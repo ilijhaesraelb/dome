@@ -1,0 +1,212 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════
+   LAYER 1 — DESIGN TOKENS
+   ═══════════════════════════════════════════════ */
+
+@layer base {
+  :root {
+    /* ── Core surfaces ── */
+    --background: 220 27% 97%;
+    --foreground: 0 0% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    /* ── Brand ── */
+    --primary: 218 41% 21%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 22 76% 53%;
+    --secondary-foreground: 0 0% 100%;
+
+    /* ── Semantic surfaces ── */
+    --muted: 220 20% 94%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 220 30% 92%;
+    --accent-foreground: 218 41% 21%;
+
+    /* ── State colors ── */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 15%;
+
+    /* ── Chrome ── */
+    --border: 220 15% 88%;
+    --input: 220 15% 88%;
+    --ring: 22 76% 53%;
+    --radius: 0.75rem;
+
+    /* ── Sidebar ── */
+    --sidebar-background: 218 41% 21%;
+    --sidebar-foreground: 220 10% 92%;
+    --sidebar-primary: 22 76% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 218 35% 28%;
+    --sidebar-accent-foreground: 220 10% 95%;
+    --sidebar-border: 218 30% 30%;
+    --sidebar-ring: 22 76% 53%;
+
+    /* ── Brand extras ── */
+    --gold: 37 33% 60%;
+    --info: 210 80% 52%;
+    --info-foreground: 0 0% 100%;
+
+    /* ── Elevation shadows (used via theme()) ── */
+    --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.04);
+    --shadow-card: 0 1px 3px 0 hsl(0 0% 0% / 0.06), 0 1px 2px -1px hsl(0 0% 0% / 0.06);
+    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.07), 0 2px 4px -2px hsl(0 0% 0% / 0.07);
+    --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.08), 0 4px 6px -4px hsl(0 0% 0% / 0.08);
+    --shadow-focus: 0 0 0 3px hsl(var(--ring) / 0.25);
+  }
+
+  .dark {
+    --background: 220 35% 7%;
+    --foreground: 220 10% 95%;
+    --card: 220 30% 10%;
+    --card-foreground: 220 10% 95%;
+    --popover: 220 30% 10%;
+    --popover-foreground: 220 10% 95%;
+    --primary: 218 41% 30%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 22 76% 53%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 15% 15%;
+    --muted-foreground: 220 10% 60%;
+    --accent: 220 25% 18%;
+    --accent-foreground: 220 40% 70%;
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 65% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 85% 50%;
+    --warning-foreground: 38 85% 10%;
+    --border: 220 15% 18%;
+    --input: 220 15% 18%;
+    --ring: 22 76% 53%;
+    --info: 210 70% 50%;
+    --info-foreground: 0 0% 100%;
+    --gold: 37 33% 55%;
+
+    --sidebar-background: 220 40% 5%;
+    --sidebar-foreground: 220 10% 90%;
+    --sidebar-primary: 22 76% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 25% 12%;
+    --sidebar-accent-foreground: 220 10% 90%;
+    --sidebar-border: 220 20% 15%;
+    --sidebar-ring: 22 76% 53%;
+  }
+}
+
+/* ═══════════════════════════════════════════════
+   LAYER 2 — BASE RESETS
+   ═══════════════════════════════════════════════ */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-family: 'Inter', sans-serif;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', sans-serif;
+  }
+}
+
+/* ═══════════════════════════════════════════════
+   LAYER 3 — UTILITY CLASSES
+   ═══════════════════════════════════════════════ */
+
+@layer components {
+  /* Minimum tap target — WCAG 2.5.8 */
+  .tap-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+}
+
+/* ═══════════════════════════════════════════════
+   LAYER 4 — PLATFORM HARDENING
+   ═══════════════════════════════════════════════ */
+
+/* Safe area insets for iOS notch/home bar */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .safe-top    { padding-top: env(safe-area-inset-top, 0px); }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (display-mode: standalone) {
+  body { overscroll-behavior-y: contain; }
+}
+
+button, a, input, select, textarea, [role="button"] {
+  touch-action: manipulation;
+}
+
+/* Prevent iOS zoom on focus */
+@media screen and (max-width: 767px) {
+  input[type="text"], input[type="email"], input[type="password"],
+  input[type="number"], input[type="tel"], input[type="url"],
+  input[type="search"], select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Landscape phone — unstick elements when keyboard is up */
+@media screen and (max-height: 500px) and (orientation: landscape) {
+  .sticky, .fixed { position: relative !important; }
+}
+
+/* Tablet split-view */
+@media screen and (min-width: 768px) and (max-width: 1024px) {
+  .tablet-stack { flex-direction: column !important; }
+  .tablet-full  { width: 100% !important; max-width: 100% !important; }
+}
+
+/* Desktop scrollbar */
+@media (pointer: fine) {
+  ::-webkit-scrollbar       { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track  { background: transparent; }
+  ::-webkit-scrollbar-thumb  { background: hsl(var(--border)); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.4); }
+}
+
+/* Focus-visible for keyboard navigation */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Capitol watermark background for portal pages */
+.dome-bg-watermark {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 600' opacity='0.03'%3E%3Cpath d='M400 100 L350 200 L280 200 L280 350 L200 350 L200 250 L160 250 L160 350 L120 350 L120 250 L80 250 L80 400 L720 400 L720 250 L680 250 L680 350 L640 350 L640 250 L600 250 L600 350 L520 350 L520 200 L450 200 Z' fill='%231F2F4A'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center top;
+  background-size: 100% auto;
+}

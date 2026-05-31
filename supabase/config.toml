@@ -1,0 +1,43 @@
+project_id = "aflrayxifcjgszydrcne"
+
+[functions.pathway-engine]
+verify_jwt = false
+
+[functions.immigration-assistant]
+verify_jwt = false
+
+[functions.uscis-locator]
+verify_jwt = false
+
+[functions.push-notifications]
+verify_jwt = false
+
+[functions.notify-new-message]
+verify_jwt = false
+
+[functions.notify-deadlines]
+verify_jwt = false
+
+[functions.document-intelligence]
+verify_jwt = false
+
+[functions.explain-question]
+verify_jwt = false
+
+[functions.create-checkout]
+verify_jwt = false
+
+[functions.check-subscription]
+verify_jwt = false
+
+[functions.customer-portal]
+verify_jwt = false
+
+[functions.uscis-case-status]
+verify_jwt = false
+
+[functions.translate-message]
+verify_jwt = false
+
+[functions.verify-tax-payment]
+verify_jwt = false

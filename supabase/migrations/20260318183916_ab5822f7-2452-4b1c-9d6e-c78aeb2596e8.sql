@@ -1,0 +1,1 @@
+ALTER VIEW public.success_map_entries_public SET (security_invoker = on);

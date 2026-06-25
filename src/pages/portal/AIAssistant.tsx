@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Mic, MicOff, Bot, User, Sparkles, Shield, FileText, Globe, Compass, Users, ClipboardList, BookOpen, ArrowRight, MapPin } from "lucide-react";
+import { Send, Mic, MicOff, Bot, User, Sparkles, Shield, FileText, Globe, Compass, Users, ClipboardList, BookOpen, ArrowRight, MapPin, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useT } from "@/hooks/useT";
+import FormFillerAgent from "@/components/form-engine/FormFillerAgent";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -96,6 +97,7 @@ const AIAssistant = ({ panelMode = false }: AIAssistantProps) => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [agentMode, setAgentMode] = useState<"chat" | "form-fill">("chat");
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const navigate = useNavigate();
@@ -175,6 +177,20 @@ const AIAssistant = ({ panelMode = false }: AIAssistantProps) => {
 
   const hasMessages = messages.length > 0;
 
+  if (agentMode === "form-fill") {
+    return (
+      <div className={cn(
+        "flex flex-col bg-background min-h-0",
+        panelMode ? "h-full w-full" : "h-[calc(100vh-120px)] max-w-3xl mx-auto px-4",
+      )}>
+        <FormFillerAgent
+          onExit={() => setAgentMode("chat")}
+          onGoToPathwayFinder={() => { setAgentMode("chat"); navigate("/pathway-finder"); }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={cn(
       "flex flex-col bg-background min-h-0",
@@ -190,10 +206,25 @@ const AIAssistant = ({ panelMode = false }: AIAssistantProps) => {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className={cn("flex-1 min-h-0 overflow-y-auto space-y-4 pb-4", panelMode && "px-4")}> 
+      <div ref={scrollRef} className={cn("flex-1 min-h-0 overflow-y-auto space-y-4 pb-4", panelMode && "px-4")}>
         {!hasMessages && (
           <div className="space-y-6 pt-2">
-            {/* Guided discovery section */}
+            {/* Fill a Form — prominent agent CTA */}
+            <button
+              onClick={() => setAgentMode("form-fill")}
+              className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 border-secondary/40 bg-gradient-to-r from-secondary/5 to-secondary/10 hover:border-secondary/70 hover:from-secondary/10 hover:to-secondary/20 transition-all group text-left"
+            >
+              <div className="w-11 h-11 rounded-xl bg-secondary/15 flex items-center justify-center shrink-0 group-hover:bg-secondary/25 transition-colors">
+                <PenLine className="w-5 h-5 text-secondary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-foreground text-sm">Fill an Application</p>
+                <p className="text-xs text-muted-foreground">Green card, citizenship, work permit, visa &amp; more — guided field by field</p>
+              </div>
+              <ArrowRight className="w-4 h-4 text-secondary shrink-0" />
+            </button>
+
+            {/* Guided questions */}
             <div>
               <p className="text-sm font-medium text-foreground mb-3 text-center">{t("ai.howCanIHelp")}</p>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
@@ -212,7 +243,7 @@ const AIAssistant = ({ panelMode = false }: AIAssistantProps) => {
               </div>
             </div>
 
-            {/* Quick actions row */}
+            {/* Quick actions */}
             <div className="flex flex-wrap gap-2 justify-center">
               <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={() => navigate("/portal/passport")}>
                 <Shield className="w-3.5 h-3.5" />
@@ -228,7 +259,7 @@ const AIAssistant = ({ panelMode = false }: AIAssistantProps) => {
               </Button>
             </div>
 
-            {/* Disclaimer card */}
+            {/* Disclaimer */}
             <div className="bg-muted/50 border border-border rounded-xl p-3 text-center">
               <p className="text-[11px] text-muted-foreground leading-relaxed">
                 <Shield className="w-3 h-3 inline-block mr-1 -mt-0.5" />
@@ -286,6 +317,10 @@ const AIAssistant = ({ panelMode = false }: AIAssistantProps) => {
       {/* Contextual action bar after conversation */}
       {hasMessages && !isLoading && (
         <div className="flex flex-wrap gap-2 justify-center py-2 shrink-0 border-t border-border/50">
+          <Button variant="ghost" size="sm" className="text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setAgentMode("form-fill")}>
+            <PenLine className="w-3.5 h-3.5" />
+            Fill a Form
+          </Button>
           <Button variant="ghost" size="sm" className="text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => send("Can you generate a document checklist for the pathway we discussed?")}>
             <ClipboardList className="w-3.5 h-3.5" />
             {t("ai.getChecklist")}

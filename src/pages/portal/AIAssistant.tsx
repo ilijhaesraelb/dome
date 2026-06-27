@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useT } from "@/hooks/useT";
 import FormFillerAgent from "@/components/form-engine/FormFillerAgent";
+import VoiceAgent from "@/components/voice-agent/VoiceAgent";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -97,7 +98,7 @@ const AIAssistant = ({ panelMode = false }: AIAssistantProps) => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [agentMode, setAgentMode] = useState<"chat" | "form-fill">("chat");
+  const [agentMode, setAgentMode] = useState<"chat" | "form-fill" | "voice">("chat");
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const navigate = useNavigate();
@@ -191,6 +192,17 @@ const AIAssistant = ({ panelMode = false }: AIAssistantProps) => {
     );
   }
 
+  if (agentMode === "voice") {
+    return (
+      <div className={cn(
+        "flex flex-col bg-background min-h-0",
+        panelMode ? "h-full w-full" : "h-[calc(100vh-120px)] max-w-3xl mx-auto px-4",
+      )}>
+        <VoiceAgent onExit={() => setAgentMode("chat")} />
+      </div>
+    );
+  }
+
   return (
     <div className={cn(
       "flex flex-col bg-background min-h-0",
@@ -209,20 +221,33 @@ const AIAssistant = ({ panelMode = false }: AIAssistantProps) => {
       <div ref={scrollRef} className={cn("flex-1 min-h-0 overflow-y-auto space-y-4 pb-4", panelMode && "px-4")}>
         {!hasMessages && (
           <div className="space-y-6 pt-2">
-            {/* Fill a Form — prominent agent CTA */}
-            <button
-              onClick={() => setAgentMode("form-fill")}
-              className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 border-secondary/40 bg-gradient-to-r from-secondary/5 to-secondary/10 hover:border-secondary/70 hover:from-secondary/10 hover:to-secondary/20 transition-all group text-left"
-            >
-              <div className="w-11 h-11 rounded-xl bg-secondary/15 flex items-center justify-center shrink-0 group-hover:bg-secondary/25 transition-colors">
-                <PenLine className="w-5 h-5 text-secondary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-foreground text-sm">Fill an Application</p>
-                <p className="text-xs text-muted-foreground">Green card, citizenship, work permit, visa &amp; more — guided field by field</p>
-              </div>
-              <ArrowRight className="w-4 h-4 text-secondary shrink-0" />
-            </button>
+            {/* Primary agent CTAs */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setAgentMode("form-fill")}
+                className="flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 border-secondary/40 bg-gradient-to-r from-secondary/5 to-secondary/10 hover:border-secondary/70 hover:from-secondary/10 hover:to-secondary/20 transition-all group text-left"
+              >
+                <div className="w-9 h-9 rounded-xl bg-secondary/15 flex items-center justify-center shrink-0 group-hover:bg-secondary/25 transition-colors">
+                  <PenLine className="w-4 h-4 text-secondary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-foreground text-sm leading-tight">Fill an Application</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">Guided field by field</p>
+                </div>
+              </button>
+              <button
+                onClick={() => setAgentMode("voice")}
+                className="flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 border-primary/30 bg-gradient-to-r from-primary/5 to-primary/10 hover:border-primary/60 hover:from-primary/10 hover:to-primary/15 transition-all group text-left"
+              >
+                <div className="w-9 h-9 rounded-xl bg-primary/15 flex items-center justify-center shrink-0 group-hover:bg-primary/25 transition-colors">
+                  <Mic className="w-4 h-4 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-foreground text-sm leading-tight">Voice Agent</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">Speak your answers aloud</p>
+                </div>
+              </button>
+            </div>
 
             {/* Guided questions */}
             <div>
@@ -320,6 +345,10 @@ const AIAssistant = ({ panelMode = false }: AIAssistantProps) => {
           <Button variant="ghost" size="sm" className="text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setAgentMode("form-fill")}>
             <PenLine className="w-3.5 h-3.5" />
             Fill a Form
+          </Button>
+          <Button variant="ghost" size="sm" className="text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setAgentMode("voice")}>
+            <Mic className="w-3.5 h-3.5" />
+            Voice Agent
           </Button>
           <Button variant="ghost" size="sm" className="text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => send("Can you generate a document checklist for the pathway we discussed?")}>
             <ClipboardList className="w-3.5 h-3.5" />

@@ -20,18 +20,21 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { SUPPORTED_LANGUAGES } from "@/hooks/useTranslation";
 import { buildFormDraftStorageKey } from "@/lib/form-flow";
 import { FORM_SECTIONS, type FormSection, type FormFieldDef } from "@/data/formSections";
 import { INDIVIDUAL_TAX_INTAKE_SECTIONS, NONPROFIT_INTAKE_SECTIONS } from "@/data/taxFormSections";
 import { detectCommand } from "@/lib/voice-agent/commandDetector";
 import { parseAnswer, isSensitiveField, maskValue } from "@/lib/voice-agent/answerParser";
+import {
+  type AgentLang,
+  AGENT_LANG_LOCALE,
+  t as tMsg,
+  getFieldQuestion,
+} from "@/lib/voice-agent/agentTranslations";
 
-// ── Language map ──────────────────────────────────────────────────────────────
-type Lang = "en" | "es" | "ht" | "fr";
-const LANG_LOCALE: Record<Lang, string> = {
-  en: "en-US", es: "es-ES", ht: "fr-HT", fr: "fr-FR",
-};
-
+// ── Types ─────────────────────────────────────────────────────────────────────
 type MicStatus = "Off" | "Listening" | "Processing" | "Confirming" | "Saved" | "Paused" | "Error";
 type Phase = "idle" | "starting" | "asking" | "confirming" | "section_end" | "form_complete" | "paused" | "error";
 
@@ -45,7 +48,7 @@ interface AgentState {
   formInstanceId: string | null;
   liveTranscript: string; agentSpeech: string;
   micStatus: MicStatus; isSpeaking: boolean;
-  language: Lang;
+  language: AgentLang;
   spellingMode: boolean; spellingBuffer: string;
   error: string | null;
 }
@@ -70,7 +73,7 @@ type Action =
   | { type: "GO_BACK" } | { type: "PAUSE" } | { type: "RESUME" }
   | { type: "STOP" } | { type: "NEXT_SECTION" }
   | { type: "TOGGLE_SPELL" } | { type: "SPELL_LETTER"; letter: string } | { type: "SPELL_DONE" }
-  | { type: "SET_LANG"; lang: Lang }
+  | { type: "SET_LANG"; lang: AgentLang }
   | { type: "SET_ERROR"; msg: string };
 
 function nextPos(s: AgentState) {
@@ -153,38 +156,9 @@ const FORM_REGISTRY: FormEntry[] = [
   { code: "NP-INTAKE", name: "Nonprofit Intake", description: "Determine your 990 filing requirements", icon: Building2, sections: NONPROFIT_INTAKE_SECTIONS, category: "tax" },
 ];
 
-// ── Per-field question scripts ─────────────────────────────────────────────────
-const FIELD_QUESTIONS: Record<string, string> = {
-  first_name: "What is your legal first name, exactly as it appears on your passport or government ID?",
-  petitioner_first_name: "What is the petitioner's legal first name?",
-  last_name: "What is your legal last name, also called your family name?",
-  petitioner_last_name: "What is the petitioner's legal last name?",
-  middle_name: "Do you have a middle name? If not, say skip.",
-  date_of_birth: "What is your date of birth? Say the month, day, and year — for example, March 15, 1985.",
-  petitioner_dob: "What is the petitioner's date of birth?",
-  country_of_birth: "What is your country of birth?",
-  petitioner_country_of_birth: "What is the petitioner's country of birth?",
-  alien_number: "Do you have an Alien Registration Number, also called an A-Number? It starts with the letter A. If you don't have one, say skip.",
-  petitioner_alien_number: "Does the petitioner have an Alien Registration Number?",
-  ssn: "What is your Social Security Number? Say each group separately. This will not be read back for your privacy.",
-  petitioner_ssn: "What is the petitioner's Social Security Number?",
-  immigration_status: "What is your current immigration status? For example: F-1 student, H-1B worker, tourist visa, or green card holder.",
-  date_of_last_entry: "When did you last enter the United States? Say the month, day, and year.",
-  marital_status: "What is your current marital status? You can say: Single, Married, Divorced, Widowed, or Separated.",
-  city: "What city do you currently live in?",
-  state: "What U.S. state do you live in?",
-  zip: "What is your ZIP code?",
-  current_address: "What is your current street address, including the street number and street name?",
-  org_legal_name: "What is the legal name of your organization as registered with the IRS?",
-  ein: "What is your organization's Employer Identification Number, or EIN? This will not be read back for your privacy.",
-  filing_status: "What is your tax filing status? You can say: Single, Married Filing Jointly, Married Filing Separately, Head of Household, or Qualifying Surviving Spouse.",
-  employment_type: "What is your primary employment type? You can say: W-2 Employee, Self-Employed or 1099, Both, Unemployed, or Retired.",
-};
-
-function buildQuestion(field: FormFieldDef): string {
-  if (FIELD_QUESTIONS[field.key]) return FIELD_QUESTIONS[field.key];
-  if (field.help?.what) return `${field.label}. ${field.help.what}`;
-  return `Please tell me your ${field.label.toLowerCase()}.`;
+// ── Build the spoken question for a field ────────────────────────────────────
+function buildQuestion(field: FormFieldDef, lang: AgentLang): string {
+  return getFieldQuestion(field.key, field.label, field.help?.what, lang);
 }
 
 // ── Mic badge ─────────────────────────────────────────────────────────────────
@@ -216,7 +190,17 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
   const [state, dispatch] = useReducer(reducer, INITIAL);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { locale } = useLanguage();
   const [showAnswers, setShowAnswers] = useState(false);
+
+  // Sync agent language with the app's current locale on first render
+  useEffect(() => {
+    const valid = SUPPORTED_LANGUAGES.find(l => l.code === locale);
+    if (valid && locale !== state.language) {
+      dispatch({ type: "SET_LANG", lang: locale as AgentLang });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Mutable refs — avoids stale closures in event handlers
   const stateRef = useRef(state);
@@ -252,7 +236,7 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
     const gen = ++speakGen.current; // tag this TTS invocation
 
     const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = LANG_LOCALE[stateRef.current.language] ?? "en-US";
+    utt.lang = AGENT_LANG_LOCALE[stateRef.current.language] ?? "en-US";
     utt.rate = 0.9;
     utt.onstart = () => dispatch({ type: "SET_SPEAKING", v: true });
     utt.onend = () => {
@@ -278,7 +262,7 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
     const s = stateRef.current;
     const field = s.sections[s.sectionIdx]?.fields[s.fieldIdx];
     if (!field) return;
-    const q = buildQuestion(field);
+    const q = buildQuestion(field, s.language);
     const warn = field.help?.warning ? ` Note: ${field.help.warning}` : "";
     const evid = field.evidenceHint ? ` You may need: ${field.evidenceHint}.` : "";
     speak(q + warn + evid, () => dispatch({ type: "SET_MIC", status: "Listening" }));
@@ -291,13 +275,13 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
         const prevSec = s.sections[s.sectionIdx - 1];
         const done = prevSec?.fields.filter(f => s.answers[f.key]).length ?? 0;
         speak(
-          `Section complete — ${done} fields saved. Moving to: ${s.sections[s.sectionIdx]?.title}.`,
+          tMsg("sectionCompleteFull", s.language, { done: String(done), nextSection: s.sections[s.sectionIdx]?.title ?? "" }),
           () => speakCurrentQuestion()
         );
       } else if (s.phase === "asking") {
         speakCurrentQuestion();
       } else if (s.phase === "form_complete") {
-        speak("You have completed all sections. Your answers are saved. You can now open the form to review and submit.");
+        speak(tMsg("formComplete", s.language));
       }
     }, 200);
   }, [speak, speakCurrentQuestion]);
@@ -317,6 +301,7 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
   const processTranscriptRef = useRef<(t: string) => void>(() => {});
   processTranscriptRef.current = (transcript: string) => {
     const s = stateRef.current;
+    const lang = s.language;
     if (s.phase !== "asking" && s.phase !== "confirming" && s.phase !== "section_end") return;
     dispatch({ type: "SET_MIC", status: "Processing" });
 
@@ -324,7 +309,7 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
     if (s.spellingMode) {
       if (/^done$/i.test(transcript.trim())) {
         dispatch({ type: "SPELL_DONE" });
-        speak(`I have: "${s.spellingBuffer.toUpperCase()}". Is that correct? Say yes or no.`);
+        speak(tMsg("spelledValue", lang, { value: s.spellingBuffer.toUpperCase() }));
       } else {
         const letters = transcript.trim().split(/\s+/).map(w => w[0] ?? "").join("").toUpperCase();
         dispatch({ type: "SPELL_LETTER", letter: letters });
@@ -337,42 +322,42 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
     if (cmd) {
       switch (cmd.command) {
         case "confirm":
-          if (s.phase === "confirming") { autoSave(); dispatch({ type: "CONFIRM" }); speak("Saved.", () => speakAfterConfirm()); }
+          if (s.phase === "confirming") { autoSave(); dispatch({ type: "CONFIRM" }); speak(tMsg("saved", lang), () => speakAfterConfirm()); }
           else dispatch({ type: "SET_MIC", status: "Listening" });
           break;
         case "reject":
           dispatch({ type: "REJECT" });
-          speak("No problem, let me ask again.", () => speakCurrentQuestion());
+          speak(tMsg("letMeAskAgain", lang), () => speakCurrentQuestion());
           break;
         case "skip": {
           const field = s.sections[s.sectionIdx]?.fields[s.fieldIdx];
-          if (field?.required) { speak(`${field.label} is required. Please provide a value.`, () => speakCurrentQuestion()); }
-          else { dispatch({ type: "SKIP" }); speak("Skipped.", () => speakAfterConfirm()); }
+          if (field?.required) { speak(tMsg("requiredField", lang, { fieldName: field.label }), () => speakCurrentQuestion()); }
+          else { dispatch({ type: "SKIP" }); speak(tMsg("skipped", lang), () => speakAfterConfirm()); }
           break;
         }
         case "back":
           dispatch({ type: "GO_BACK" });
-          speak("Going back.", () => speakCurrentQuestion());
+          speak(tMsg("goingBack", lang), () => speakCurrentQuestion());
           break;
         case "pause":
           dispatch({ type: "PAUSE" });
           stopListening();
-          speak("Session paused. Press Resume when ready.");
+          speak(tMsg("paused", lang));
           break;
         case "stop":
           stopListening(); window.speechSynthesis?.cancel(); dispatch({ type: "STOP" });
           break;
         case "help":
-          speak("Say 'yes' to confirm an answer, 'no' to try again, 'back' to change a previous field, 'skip' for optional fields, 'spell' to spell letter by letter, 'pause' to take a break, 'review' to hear your answers, or 'stop' to end.");
+          speak(tMsg("helpText", lang));
           break;
         case "repeat": speakCurrentQuestion(); break;
         case "spell":
           dispatch({ type: "TOGGLE_SPELL" });
-          speak(s.spellingMode ? "Spelling mode off." : "Spelling mode on. Say each letter, then say done.");
+          speak(s.spellingMode ? tMsg("spellingModeOff", lang) : tMsg("spellingModeOn", lang));
           break;
         case "review": {
           const entries = Object.entries(s.answers);
-          if (!entries.length) { speak("No answers saved yet."); break; }
+          if (!entries.length) { speak(tMsg("noAnswersYet", lang)); break; }
           const allFields = s.sections.flatMap(sec => sec.fields);
           const summary = entries.map(([k, v]) => {
             const f = allFields.find(x => x.key === k);
@@ -382,12 +367,12 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
           break;
         }
         case "next":
-          if (s.phase === "confirming") { autoSave(); dispatch({ type: "CONFIRM" }); speak("Saved.", () => speakAfterConfirm()); }
+          if (s.phase === "confirming") { autoSave(); dispatch({ type: "CONFIRM" }); speak(tMsg("saved", lang), () => speakAfterConfirm()); }
           else if (s.phase === "section_end") { dispatch({ type: "NEXT_SECTION" }); speakCurrentQuestion(); }
           else dispatch({ type: "SET_MIC", status: "Listening" });
           break;
         case "save":
-          if (s.phase === "confirming") { autoSave(); dispatch({ type: "CONFIRM" }); speak("Saved.", () => speakAfterConfirm()); }
+          if (s.phase === "confirming") { autoSave(); dispatch({ type: "CONFIRM" }); speak(tMsg("saved", lang), () => speakAfterConfirm()); }
           break;
         default: dispatch({ type: "SET_MIC", status: "Listening" });
       }
@@ -401,11 +386,11 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
       const parsed = parseAnswer(transcript, field.key, field.type);
       dispatch({ type: "SET_PENDING", value: parsed.value, masked: parsed.masked, sensitive: parsed.sensitive });
       const confirmText = parsed.sensitive
-        ? `I've recorded your ${field.label.toLowerCase()}. For privacy it won't be read back. Is it correct? Say yes to save or no to try again.`
-        : `I heard "${parsed.masked}". Is that correct? Say yes to save or no to try again.`;
+        ? tMsg("confirmPromptSensitive", lang, { fieldName: field.label.toLowerCase() })
+        : tMsg("confirmPromptSafe", lang, { value: parsed.masked });
       speak(confirmText);
     } else if (s.phase === "confirming") {
-      speak(`Please say yes to confirm, or no to try again.`);
+      speak(tMsg("confirmYesOrNo", lang));
     } else {
       dispatch({ type: "SET_MIC", status: "Listening" });
     }
@@ -418,6 +403,19 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
       dispatch({ type: "SET_ERROR", msg: "Voice recognition is not supported in this browser. Please use Chrome or Edge." });
       return;
     }
+    // Flush any pending transcript before resetting — handles Chrome ending
+    // recognition naturally after delivering a final result (race with debounce)
+    if (debounceTimer.current) {
+      const pending = accumulatedFinals.current.trim();
+      clearTimeout(debounceTimer.current);
+      debounceTimer.current = null;
+      if (pending) {
+        accumulatedFinals.current = "";
+        processTranscriptRef.current(pending);
+        return; // processTranscript → speak() → restarts mic after TTS
+      }
+    }
+
     // Always create a fresh instance — reusing the same instance after abort/end fails on Chrome
     try { recognitionRef.current?.abort(); } catch {}
     recognitionRef.current = null;
@@ -426,7 +424,7 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
-    rec.lang = LANG_LOCALE[stateRef.current.language] ?? "en-US";
+    rec.lang = AGENT_LANG_LOCALE[stateRef.current.language] ?? "en-US";
 
     rec.onresult = (event: any) => {
       // No isSpeaking guard — we physically stop recognition before TTS starts
@@ -442,12 +440,15 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
 
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       if (accumulatedFinals.current.trim()) {
+        const accumulated = accumulatedFinals.current.trim();
+        const delay = detectCommand(accumulated) ? 500 : 1400;
         debounceTimer.current = window.setTimeout(() => {
           const t = accumulatedFinals.current.trim();
+          if (!t) return;
           accumulatedFinals.current = "";
           dispatch({ type: "SET_LIVE", text: "" });
           processTranscriptRef.current(t);
-        }, 1400);
+        }, delay);
       }
     };
 
@@ -457,10 +458,8 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
     };
 
     // onend: only auto-restart for unexpected ends (not caused by speak())
-    // speak() handles its own restart via the generation counter
     rec.onend = () => {
       if (recognitionRef.current === rec) recognitionRef.current = null;
-      // If we ended while the user should be speaking (not during TTS), restart
       const s = stateRef.current;
       if ((s.phase === "asking" || s.phase === "confirming") && !s.isSpeaking) {
         setTimeout(() => {
@@ -498,10 +497,11 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
 
       dispatch({ type: "START", formCode: entry.code, formName: entry.name, sections, formInstanceId: fi.id });
 
-      // Speak welcome → then first question (speak() restarts mic via gen counter after question ends)
+      const lang = stateRef.current.language;
       speak(
-        `Welcome! I'll guide you through the ${entry.name}. Say yes to confirm answers, no to try again, back to change a previous field, pause to take a break, or stop to end. ` +
-        `Let's start with: ${sections[0].title}.`,
+        tMsg("welcomePart1", lang, { formName: entry.name }) + " " +
+        tMsg("welcomePart2", lang) + " " +
+        tMsg("startWith", lang, { sectionTitle: sections[0].title }),
         () => speakCurrentQuestion()
       );
     } catch (err: any) {
@@ -515,7 +515,6 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
     return () => { stopListening(); window.speechSynthesis?.cancel(); };
   }, [stopListening]);
 
-  // Stop recognition when transitioning to non-active phases
   useEffect(() => {
     if (["paused", "idle", "form_complete", "section_end", "error"].includes(state.phase)) {
       stopListening();
@@ -529,6 +528,23 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
   const answeredCount = Object.keys(state.answers).length;
   const progressPct = totalFields > 0 ? Math.round((answeredCount / totalFields) * 100) : 0;
 
+  // ── Language picker (shared across idle + active views) ───────────────────
+  const LangPicker = (
+    <div className="relative inline-flex items-center">
+      <Globe className="absolute left-2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+      <select
+        value={state.language}
+        onChange={e => dispatch({ type: "SET_LANG", lang: e.target.value as AgentLang })}
+        className="appearance-none pl-7 pr-6 py-1 text-xs rounded-md border border-border bg-muted/50 text-foreground hover:bg-accent cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/40"
+      >
+        {SUPPORTED_LANGUAGES.map(l => (
+          <option key={l.code} value={l.code}>{l.flag} {l.label}</option>
+        ))}
+      </select>
+      <ChevronDown className="absolute right-1.5 w-3 h-3 text-muted-foreground pointer-events-none" />
+    </div>
+  );
+
   // ── Form selection ────────────────────────────────────────────────────────────
   if (state.phase === "idle") {
     const immForms = FORM_REGISTRY.filter(f => f.category === "immigration" && f.sections.length > 0);
@@ -539,23 +555,16 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
           <button onClick={onExit} className="p-1 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-4 h-4" />
           </button>
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-primary/15 flex items-center justify-center">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-primary/15 flex items-center justify-center shrink-0">
               <Mic className="w-4 h-4 text-primary" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-semibold leading-none">Voice Application Agent</p>
               <p className="text-[11px] text-muted-foreground">Select a form — answer questions by speaking</p>
             </div>
           </div>
-          <div className="ml-auto flex gap-1">
-            {(["en", "es", "fr"] as Lang[]).map(l => (
-              <button key={l} onClick={() => dispatch({ type: "SET_LANG", lang: l })}
-                className={cn("px-2 py-0.5 rounded text-xs font-medium transition-colors", state.language === l ? "bg-secondary text-secondary-foreground" : "bg-muted text-muted-foreground hover:bg-accent")}>
-                {l.toUpperCase()}
-              </button>
-            ))}
-          </div>
+          <div className="ml-auto shrink-0">{LangPicker}</div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div>
@@ -652,17 +661,18 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
             Section {state.sectionIdx + 1} / {state.sections.length}: {currentSection?.title ?? ""}
           </p>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {LangPicker}
           {state.phase === "paused" ? (
             <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => {
               dispatch({ type: "RESUME" });
-              speak("Resuming.", () => speakCurrentQuestion());
+              speak(tMsg("resuming", state.language), () => speakCurrentQuestion());
             }}>
               <Play className="w-3 h-3" /> Resume
             </Button>
           ) : (
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
-              dispatch({ type: "PAUSE" }); stopListening(); speak("Session paused.");
+              dispatch({ type: "PAUSE" }); stopListening(); speak(tMsg("paused", state.language));
             }}>
               <Pause className="w-3.5 h-3.5" />
             </Button>
@@ -695,11 +705,11 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
             <button onClick={() => speakCurrentQuestion()} className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="Repeat question">
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
-            <button onClick={() => { dispatch({ type: "GO_BACK" }); speak("Going back.", () => speakCurrentQuestion()); }}
+            <button onClick={() => { dispatch({ type: "GO_BACK" }); speak(tMsg("goingBack", state.language), () => speakCurrentQuestion()); }}
               className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="Previous field">
               <ChevronLeft className="w-3.5 h-3.5" />
             </button>
-            <button onClick={() => { dispatch({ type: "TOGGLE_SPELL" }); speak(state.spellingMode ? "Spelling mode off." : "Spelling mode on. Say each letter, then say done."); }}
+            <button onClick={() => { dispatch({ type: "TOGGLE_SPELL" }); speak(state.spellingMode ? tMsg("spellingModeOff", state.language) : tMsg("spellingModeOn", state.language)); }}
               className={cn("p-1.5 rounded-md transition-colors", state.spellingMode ? "bg-secondary/15 text-secondary" : "hover:bg-accent text-muted-foreground hover:text-foreground")} title="Spell mode">
               <Keyboard className="w-3.5 h-3.5" />
             </button>
@@ -713,7 +723,7 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
             <p className="text-xs text-emerald-700 mb-3">Next: <strong>{currentSection?.title}</strong></p>
             <Button size="sm" className="gap-1.5 h-8" onClick={() => {
               dispatch({ type: "NEXT_SECTION" });
-              speak(`Moving to ${currentSection?.title}.`, () => speakCurrentQuestion());
+              speak(tMsg("movingTo", state.language, { sectionTitle: currentSection?.title ?? "" }), () => speakCurrentQuestion());
             }}>
               Continue <ArrowRight className="w-3 h-3" />
             </Button>
@@ -763,14 +773,14 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
               {state.pendingSensitive && <span className="text-xs text-muted-foreground font-normal">(protected)</span>}
             </p>
             <div className="flex gap-2 flex-wrap">
-              <Button size="sm" className="gap-1.5 h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => { autoSave(); dispatch({ type: "CONFIRM" }); speak("Saved.", () => speakAfterConfirm()); }}>
+              <Button size="sm" className="gap-1.5 h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => { autoSave(); dispatch({ type: "CONFIRM" }); speak(tMsg("saved", state.language), () => speakAfterConfirm()); }}>
                 <Check className="w-3.5 h-3.5" /> Yes, save
               </Button>
-              <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => { dispatch({ type: "REJECT" }); speak("Let me ask again.", () => speakCurrentQuestion()); }}>
+              <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => { dispatch({ type: "REJECT" }); speak(tMsg("letMeAskAgain", state.language), () => speakCurrentQuestion()); }}>
                 <RefreshCw className="w-3.5 h-3.5" /> No, try again
               </Button>
               {!currentField?.required && (
-                <Button size="sm" variant="ghost" className="h-8 text-muted-foreground" onClick={() => { dispatch({ type: "SKIP" }); speak("Skipped.", () => speakAfterConfirm()); }}>
+                <Button size="sm" variant="ghost" className="h-8 text-muted-foreground" onClick={() => { dispatch({ type: "SKIP" }); speak(tMsg("skipped", state.language), () => speakAfterConfirm()); }}>
                   Skip
                 </Button>
               )}
@@ -821,7 +831,7 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
       {/* Bottom bar */}
       {state.phase === "asking" && (
         <div className="shrink-0 border-t border-border px-4 py-2 flex items-center gap-2">
-          <button onClick={() => { dispatch({ type: "GO_BACK" }); speak("Going back.", () => speakCurrentQuestion()); }}
+          <button onClick={() => { dispatch({ type: "GO_BACK" }); speak(tMsg("goingBack", state.language), () => speakCurrentQuestion()); }}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
             <ChevronLeft className="w-3.5 h-3.5" /> Back
           </button>
@@ -829,7 +839,7 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
             Field {state.fieldIdx + 1} / {currentSection?.fields.length ?? 0}
           </p>
           {!currentField?.required && (
-            <button onClick={() => { dispatch({ type: "SKIP" }); speak("Skipped.", () => speakAfterConfirm()); }}
+            <button onClick={() => { dispatch({ type: "SKIP" }); speak(tMsg("skipped", state.language), () => speakAfterConfirm()); }}
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
               Skip <ChevronRight className="w-3.5 h-3.5" />
             </button>

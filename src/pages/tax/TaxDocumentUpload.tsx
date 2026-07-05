@@ -73,11 +73,12 @@ const TaxDocumentUpload = () => {
         const path = `tax/${user.id}/${taxFileId}/${Date.now()}_${file.name}`;
         const { error: uploadErr } = await supabase.storage.from("case-documents").upload(path, file);
         if (uploadErr) { toast({ title: "Upload failed", description: uploadErr.message, variant: "destructive" }); continue; }
-        const { data: doc } = await supabase.from("tax_file_documents").insert({
+        const { data: doc, error: insertErr } = await supabase.from("tax_file_documents").insert({
           tax_file_id: taxFileId, uploaded_by: user.id, name: file.name, category: selectedCategory,
           file_path: path, file_type: file.type, file_size: file.size,
           tax_year: parseInt(taxYear), extraction_status: "pending",
         } as any).select("id, name, category, file_type, file_size, extraction_status, ai_classification, created_at").single();
+        if (insertErr) { toast({ title: "Failed to save document", description: insertErr.message, variant: "destructive" }); continue; }
         if (doc) setDocs(prev => [doc as any, ...prev]);
       }
       toast({ title: `${files.length} document(s) uploaded` });

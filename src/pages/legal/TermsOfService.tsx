@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import BackButton from "@/components/BackButton";
+import LegalEntityNotice from "@/components/LegalEntityNotice";
 import domeLogo from "@/assets/dome-logo.png";
 
 const TermsOfService = () => {
@@ -29,11 +30,21 @@ const TermsOfService = () => {
           </section>
 
           <section>
-            <h2 className="font-display text-xl font-semibold text-foreground">2. Responsible Entity</h2>
-            <p>D.O.M.E. AI and www.domeai.org are owned and operated by AREI GROUP.</p>
-            <p>AREI GROUP is incorporated in the State of Delaware and registered as a foreign entity in the State of New York.</p>
+            <h2 className="font-display text-xl font-semibold text-foreground">2. Company Information</h2>
             <p>
-              References to "D.O.M.E.," "Platform," "we," "our," or "us" refer to AREI GROUP and its authorized operations associated with the D.O.M.E. platform.
+              DOME AI ("DOME," "Platform," "We," "Us," or "Our") is owned and operated by:
+            </p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Accelerated Real Estate Investment Corp. (AREI GROUP)</li>
+              <li>A Delaware Corporation</li>
+              <li>Foreign Registered in New York State</li>
+              <li>
+                Website: <a href="https://www.domeai.org" className="underline">https://www.domeai.org</a>
+              </li>
+            </ul>
+            <p>DOME AI is a technology platform and service operated under AREI GROUP.</p>
+            <p>
+              AREI GROUP is the responsible legal entity for the operation, maintenance, security, and administration of the DOME AI platform.
             </p>
           </section>
 
@@ -191,6 +202,9 @@ const TermsOfService = () => {
           <Link to="/security" className="hover:text-foreground">Security</Link>
           <Link to="/platform-position" className="hover:text-foreground">Platform Position</Link>
           <span>© {new Date().getFullYear()} D.O.M.E.</span>
+        </div>
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-6">
+          <LegalEntityNotice />
         </div>
       </footer>
     </div>

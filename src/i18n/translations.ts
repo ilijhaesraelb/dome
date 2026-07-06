@@ -1374,6 +1374,8 @@ const en: TranslationDict = {
 
   "legal.securityTitle": "Security & Data Protection",
   "legal.securitySubtitle": "Bank-grade security for your most sensitive information",
+  "legal.responsibleEntityTitle": "Responsible Entity",
+  "legal.responsibleEntityText": "D.O.M.E. AI and www.domeai.org are owned and operated by Accelerated Real Estate Investment Corp. (AREI GROUP), a Delaware corporation authorized to conduct business in the State of New York. AREI GROUP is the responsible legal entity for the operation, maintenance, security, and administration of the D.O.M.E. platform.",
   "legal.secTLS": "TLS 1.3 Encryption",
   "legal.secTLSDesc": "All data in transit is encrypted with the latest TLS 1.3 protocol.",
   "legal.secAES": "AES-256 at Rest",

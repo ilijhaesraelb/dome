@@ -16,6 +16,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import domeLogo from "@/assets/dome-logo.png";
+import LegalEntityNotice from "@/components/LegalEntityNotice";
 
 // ---------- voice hook for individual fields ----------
 function useFieldMic(onResult: (text: string) => void) {
@@ -826,6 +827,9 @@ const AffiliateProgram = () => {
             <Link to="/privacy" className="hover:text-foreground">Privacy</Link>
             <span>© {new Date().getFullYear()} D.O.M.E.</span>
           </div>
+        </div>
+        <div className="max-w-5xl mx-auto px-4 pb-4">
+          <LegalEntityNotice />
         </div>
       </footer>
     </div>

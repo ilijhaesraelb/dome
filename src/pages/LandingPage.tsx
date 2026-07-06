@@ -34,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import domeLogo from "@/assets/dome-logo.png";
+import LegalEntityNotice from "@/components/LegalEntityNotice";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { getSiteTranslations } from "@/i18n/siteTranslations";
 import { useAuth } from "@/contexts/AuthContext";
@@ -423,8 +424,12 @@ const LandingPage = () => {
             <span>© {new Date().getFullYear()} D.O.M.E.</span>
           </div>
         </div>
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-6">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-6 space-y-1">
           <p className="text-xs text-muted-foreground/60 text-center">{copy.footer.disclaimer}</p>
+          <div className="p-3 ">
+
+          <LegalEntityNotice />
+          </div>
         </div>
       </footer>
     </div>

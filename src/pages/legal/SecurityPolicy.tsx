@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Shield, Lock, Eye, Server, Database, AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import BackButton from "@/components/BackButton";
+import LegalEntityNotice from "@/components/LegalEntityNotice";
 import domeLogo from "@/assets/dome-logo.png";
 import { useT } from "@/hooks/useT";
 
@@ -51,6 +52,10 @@ const SecurityPolicy = () => {
 
         <div className="prose prose-sm max-w-none space-y-8 text-foreground/90">
           <section>
+            <h2 className="font-display text-xl font-semibold text-foreground">{t("legal.responsibleEntityTitle")}</h2>
+            <p>{t("legal.responsibleEntityText")}</p>
+          </section>
+          <section>
             <h2 className="font-display text-xl font-semibold text-foreground">{t("legal.secDocProtTitle")}</h2>
             <p>{t("legal.secDocProtText")}</p>
           </section>
@@ -84,6 +89,9 @@ const SecurityPolicy = () => {
           <Link to="/security" className="hover:text-foreground">{t("common.security")}</Link>
           <Link to="/platform-position" className="hover:text-foreground">{t("common.platformPosition")}</Link>
           <span>© {new Date().getFullYear()} D.O.M.E.</span>
+        </div>
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-6">
+          <LegalEntityNotice />
         </div>
       </footer>
     </div>

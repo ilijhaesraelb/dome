@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
-import { Scale, Shield, Users, Briefcase, Heart } from "lucide-react";
+import { Scale, Shield, Users, Briefcase, Heart, Building2 } from "lucide-react";
 import BackButton from "@/components/BackButton";
+import LegalEntityNotice from "@/components/LegalEntityNotice";
 import domeLogo from "@/assets/dome-logo.png";
 import { useT } from "@/hooks/useT";
 
@@ -23,6 +24,14 @@ const PlatformPosition = () => {
         <p className="text-muted-foreground text-sm mb-10">{t("legal.positionSubtitle")}</p>
 
         <div className="prose prose-sm max-w-none space-y-8 text-foreground/90">
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Building2 className="w-5 h-5 text-secondary" />
+              <h2 className="font-display text-xl font-semibold text-foreground m-0">{t("legal.responsibleEntityTitle")}</h2>
+            </div>
+            <p>{t("legal.responsibleEntityText")}</p>
+          </section>
+
           <section>
             <div className="flex items-center gap-2 mb-3">
               <Heart className="w-5 h-5 text-secondary" />
@@ -81,6 +90,9 @@ const PlatformPosition = () => {
           <Link to="/security" className="hover:text-foreground">{t("common.security")}</Link>
           <Link to="/platform-position" className="hover:text-foreground">{t("common.platformPosition")}</Link>
           <span>© {new Date().getFullYear()} D.O.M.E.</span>
+        </div>
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-6">
+          <LegalEntityNotice />
         </div>
       </footer>
     </div>

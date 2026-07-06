@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import BackButton from "@/components/BackButton";
+import LegalEntityNotice from "@/components/LegalEntityNotice";
 import domeLogo from "@/assets/dome-logo.png";
 
 const PrivacyPolicy = () => {
@@ -32,14 +33,13 @@ const PrivacyPolicy = () => {
           </section>
 
           <section>
-            <h2 className="font-display text-xl font-semibold text-foreground">2. Responsible Business Entity</h2>
+            <h2 className="font-display text-xl font-semibold text-foreground">2. Who We Are</h2>
+            <p>DOME AI is owned and operated by:</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Responsible Entity: AREI GROUP</li>
-              <li>State of Incorporation: Delaware</li>
-              <li>Foreign Registration: New York</li>
-              <li>Platform: D.O.M.E. AI</li>
-              <li>Website: www.domeai.org</li>
+              <li>Accelerated Real Estate Investment Corp. (AREI GROUP)</li>
+              <li>A Delaware Corporation and foreign registered corporation in New York State</li>
             </ul>
+            <p>AREI GROUP is the data controller and responsible entity for all information collected through DOME AI.</p>
           </section>
 
           <section>
@@ -72,10 +72,24 @@ const PrivacyPolicy = () => {
               <li>Usage and analytics data</li>
             </ul>
             <p>
-              USCIS receipt numbers and related case identifiers are treated as personally identifiable information (PII).
-            </p>
-            <p>
               Users voluntarily provide USCIS receipt numbers and related information for workflow organization, case tracking, document preparation assistance, and platform functionality.
+            </p>
+
+            <h3 className="font-display text-lg font-semibold text-foreground mt-4">Immigration Information</h3>
+            <p>Depending on the services used, DOME AI may collect:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>USCIS Receipt Numbers</li>
+              <li>Alien Registration Numbers (A-Numbers)</li>
+              <li>USCIS Online Account Numbers</li>
+              <li>Immigration Case Numbers</li>
+              <li>Passport Information</li>
+              <li>Visa Information</li>
+              <li>Employment Authorization Information</li>
+              <li>Immigration Application Information</li>
+              <li>Supporting Documentation</li>
+            </ul>
+            <p>
+              USCIS Receipt Numbers are treated as Personally Identifiable Information (PII) and are protected using industry-standard security controls.
             </p>
           </section>
 
@@ -96,6 +110,20 @@ const PrivacyPolicy = () => {
               <li>Improve accessibility and platform functionality</li>
             </ul>
             <p className="font-medium">D.O.M.E. does not sell personal information to third parties.</p>
+
+            <h3 className="font-display text-lg font-semibold text-foreground mt-4">Use of USCIS Receipt Numbers</h3>
+            <p>USCIS Receipt Numbers may be used to:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Identify and organize immigration cases</li>
+              <li>Associate uploaded documents with the correct case file</li>
+              <li>Assist users with case tracking and case management</li>
+              <li>Generate reports and application packages</li>
+              <li>Support authorized legal representatives or accredited representatives assisting the user</li>
+              <li>Facilitate integrations with government systems where legally permitted</li>
+              <li>Improve platform workflow and user experience</li>
+            </ul>
+            <p>DOME AI does not sell USCIS Receipt Numbers to third parties.</p>
+            <p>Receipt Numbers are only used for legitimate case-management and service-delivery purposes.</p>
           </section>
 
           <section>
@@ -146,6 +174,17 @@ const PrivacyPolicy = () => {
               <li>Secure third-party payment processing systems</li>
             </ul>
             <p>No method of transmission or storage is guaranteed to be completely secure.</p>
+
+            <h3 className="font-display text-lg font-semibold text-foreground mt-4">Protection of Immigration Information</h3>
+            <p>DOME AI employs administrative, technical, and physical safeguards designed to protect:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>USCIS Receipt Numbers</li>
+              <li>A-Numbers</li>
+              <li>Passport Information</li>
+              <li>Immigration Records</li>
+              <li>Uploaded Documents</li>
+            </ul>
+            <p>Access is restricted to authorized users, representatives, and personnel with a legitimate business need.</p>
           </section>
 
           <section>
@@ -215,6 +254,9 @@ const PrivacyPolicy = () => {
           <Link to="/security" className="hover:text-foreground">Security</Link>
           <Link to="/platform-position" className="hover:text-foreground">Platform Position</Link>
           <span>© {new Date().getFullYear()} D.O.M.E.</span>
+        </div>
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 pb-6">
+          <LegalEntityNotice />
         </div>
       </footer>
     </div>

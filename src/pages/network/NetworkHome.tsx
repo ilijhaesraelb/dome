@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import BackButton from "@/components/BackButton";
 import domeLogo from "@/assets/dome-logo.png";
+import LegalEntityNotice from "@/components/LegalEntityNotice";
 import {
   Globe, Briefcase, Building2, Heart, GraduationCap, Home,
   Users, ArrowRight, Shield, MapPin, AlertTriangle
@@ -135,6 +136,9 @@ const NetworkHome = () => {
             <Link to="/privacy" className="hover:text-foreground transition-colors">{t("common.privacy")}</Link>
             <span>© {new Date().getFullYear()} D.O.M.E.</span>
           </div>
+        </div>
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-6">
+          <LegalEntityNotice />
         </div>
       </footer>
     </div>

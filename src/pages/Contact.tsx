@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Mail, ArrowRight, Loader2, Building2 } from "lucide-react";
 import domeLogo from "@/assets/dome-logo.png";
+import LegalEntityNotice from "@/components/LegalEntityNotice";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useT } from "@/hooks/useT";
@@ -229,6 +230,9 @@ const Contact = () => {
             <Link to="/privacy" className="hover:text-foreground">{t("common.privacy")}</Link>
             <span>© {new Date().getFullYear()} D.O.M.E.</span>
           </div>
+        </div>
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-6">
+          <LegalEntityNotice />
         </div>
       </footer>
     </div>

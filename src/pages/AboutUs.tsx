@@ -6,6 +6,7 @@ import {
   ArrowRight, CheckCircle2, Building2, GraduationCap
 } from "lucide-react";
 import domeLogo from "@/assets/dome-logo.png";
+import LegalEntityNotice from "@/components/LegalEntityNotice";
 import { useT } from "@/hooks/useT";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 
@@ -169,8 +170,9 @@ const AboutUs = () => {
             <span>© {new Date().getFullYear()} D.O.M.E.</span>
           </div>
         </div>
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-6">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-6 space-y-1">
           <p className="text-xs text-muted-foreground/60 text-center">{t("common.disclaimerLong")}</p>
+          <LegalEntityNotice />
         </div>
       </footer>
     </div>

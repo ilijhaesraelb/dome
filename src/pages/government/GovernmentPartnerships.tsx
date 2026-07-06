@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
+import LegalEntityNotice from "@/components/LegalEntityNotice";
 
 /* ─── SECTION 2: Institutional Use Cases ─── */
 const useCases = [
@@ -635,6 +636,7 @@ const GovernmentPartnerships = () => {
           <p className="text-[10px] text-primary-foreground/30 mt-4">
             © {new Date().getFullYear()} AREI Group. D.O.M.E. — Digital Onboarding for Migration Ease. All rights reserved.
           </p>
+          <LegalEntityNotice className="text-[10px] text-primary-foreground/30" />
         </div>
       </footer>
     </div>

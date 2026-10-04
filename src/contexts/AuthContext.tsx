@@ -101,8 +101,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
-          setTimeout(() => fetchRoles(session.user.id), 0);
-          setTimeout(() => checkSubscription(), 100);
+          const userId = session.user.id;
+          setTimeout(() => {
+            fetchRoles(userId).finally(() => setLoading(false));
+            checkSubscription();
+          }, 0);
 
           // Audit auth events
           if (event === "SIGNED_IN") {
@@ -121,16 +124,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         } else {
           setRoles([]);
           setSubscription({ ...defaultSubscription, loading: false });
+          setLoading(false);
         }
-        setLoading(false);
       }
     );
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchRoles(session.user.id);
+        await fetchRoles(session.user.id);
         checkSubscription();
       } else {
         setSubscription({ ...defaultSubscription, loading: false });

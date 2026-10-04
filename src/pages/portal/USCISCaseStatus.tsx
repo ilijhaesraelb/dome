@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { useT } from "@/hooks/useT";
+import { resolveCaseStatusError } from "@/lib/uscisError";
 
 interface CaseStatusResult {
   case_status: {
@@ -64,27 +65,27 @@ const USCISCaseStatus = () => {
       });
 
       if (fnError) {
-        // supabase.functions.invoke wraps non-2xx as FunctionsHttpError —
-        // try to extract the JSON body which contains our friendly message
         try {
           const ctx = (fnError as any).context;
           if (ctx && typeof ctx.json === "function") {
             const body = await ctx.json();
-            if (body?.error) {
-              setError(body.error);
-              setErrorCode(body.code || null);
-            } else {
-              setError(fnError.message);
-            }
+            const resolved = resolveCaseStatusError(body);
+            setError(resolved.message);
+            setErrorCode(resolved.code);
           } else {
-            setError(fnError.message);
+            const resolved = resolveCaseStatusError({ code: fnError.status, message: fnError.message });
+            setError(resolved.message);
+            setErrorCode(resolved.code);
           }
         } catch {
-          setError(fnError.message);
+          const resolved = resolveCaseStatusError({ code: fnError.status, message: fnError.message });
+          setError(resolved.message);
+          setErrorCode(resolved.code);
         }
       } else if (data?.error) {
-        setError(data.error);
-        setErrorCode(data.code || null);
+        const resolved = resolveCaseStatusError(data);
+        setError(resolved.message);
+        setErrorCode(resolved.code);
       } else {
         setResult(data);
       }
@@ -153,11 +154,12 @@ const USCISCaseStatus = () => {
               errorCode === 404 ? "text-foreground" :
               "text-destructive"
             )}>
-              {errorCode === 503 ? t("uscis.serviceUnavailable") :
-               errorCode === 404 ? t("uscis.caseNotFound") :
-               errorCode === 429 ? t("uscis.rateLimited") :
-               errorCode === 401 || errorCode === 403 ? t("uscis.accessDenied") :
-               t("uscis.lookupFailed")}
+              {errorCode === 503 ? "Service Unavailable" :
+               errorCode === 404 ? "Case Status Online does not recognize the receipt number entered. Please check your receipt number and try again. If you need further assistance, please call the USCIS Contact Center at 1-800-375-5283." :
+               errorCode === 429 ? "Spike Arrest Violation" :
+               errorCode === 401 || errorCode === 403 ? "Invalid Access Token" :
+               errorCode === 422 ? "The application receipt number is not formatted correctly, It should be total of 13 characters (3 character prefix followed by 10 digits). Please check your receipt number and try again" :
+               "Lookup Failed"}
             </p>
             <p className="text-sm text-muted-foreground mt-1">{error}</p>
           </div>

@@ -1,8 +1,15 @@
 /**
  * D.O.M.E. Voice-Guided Application Agent
  *
+ * Speech is powered by OpenAI (Whisper for speech-to-text, TTS for text-to-speech)
+ * via the voice-agent-stt / voice-agent-tts Supabase edge functions — the OpenAI
+ * key never reaches the browser. Recording uses a simple energy-based voice
+ * activity detector (VAD) so the mic auto-stops once the user stops talking,
+ * since OpenAI's STT (unlike the browser's SpeechRecognition) only accepts a
+ * finished audio clip rather than a live stream.
+ *
  * Security:
- *  - Raw audio is never stored — only parsed text values
+ *  - Raw audio is sent to OpenAI for transcription only, never stored
  *  - Sensitive fields (SSN, A-Number, EIN, passport) masked in UI, never spoken aloud
  *  - Confirmation required before saving any sensitive field
  */
@@ -29,10 +36,16 @@ import { detectCommand } from "@/lib/voice-agent/commandDetector";
 import { parseAnswer, isSensitiveField, maskValue } from "@/lib/voice-agent/answerParser";
 import {
   type AgentLang,
-  AGENT_LANG_LOCALE,
   t as tMsg,
   getFieldQuestion,
 } from "@/lib/voice-agent/agentTranslations";
+
+// VAD tuning — energy-based silence detection since OpenAI's STT (unlike the
+// browser's SpeechRecognition) needs a finished clip rather than a live stream.
+const SPEECH_RMS_THRESHOLD = 0.02;
+const SILENCE_HOLD_MS = 1100;
+const NO_SPEECH_TIMEOUT_MS = 8000;
+const MAX_RECORD_MS = 20000;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type MicStatus = "Off" | "Listening" | "Processing" | "Confirming" | "Saved" | "Paused" | "Error";
@@ -206,56 +219,131 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  const recognitionRef = useRef<any>(null);
-  const accumulatedFinals = useRef("");
-  const debounceTimer = useRef<number | null>(null);
-  const speakGen = useRef(0); // generation counter: only last TTS restarts mic
+  const speakGen = useRef(0); // generation counter: only the last speak() call restarts the mic
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Mic capture + voice activity detection (VAD) for OpenAI STT
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<BlobPart[]>([]);
+  const processOnStopRef = useRef(true);
+  const vadIntervalRef = useRef<number | null>(null);
+  const silenceTimerRef = useRef<number | null>(null);
+  const noSpeechTimerRef = useRef<number | null>(null);
+  const maxRecordTimerRef = useRef<number | null>(null);
 
   // Forward-declared so speak() can call startListening without circular dep
   const startListeningRef = useRef<() => void>(() => {});
 
-  // ── Stop recognition ────────────────────────────────────────────────────────
-  const stopListening = useCallback(() => {
-    if (debounceTimer.current) { clearTimeout(debounceTimer.current); debounceTimer.current = null; }
-    try { recognitionRef.current?.abort(); } catch {}
-    recognitionRef.current = null;
-    accumulatedFinals.current = "";
+  // ── Release the mic entirely (session end / unmount) ────────────────────────
+  const releaseMic = useCallback(() => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(t => t.stop());
+      mediaStreamRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      try { audioCtxRef.current.close(); } catch {}
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
   }, []);
 
-  // ── TTS — stops recognition before speaking, restarts after via gen counter ─
+  // ── Stop the current recording cycle (keeps the mic stream warm) ────────────
+  const stopListening = useCallback(() => {
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (noSpeechTimerRef.current) { clearTimeout(noSpeechTimerRef.current); noSpeechTimerRef.current = null; }
+    if (maxRecordTimerRef.current) { clearTimeout(maxRecordTimerRef.current); maxRecordTimerRef.current = null; }
+    if (vadIntervalRef.current) { window.clearInterval(vadIntervalRef.current); vadIntervalRef.current = null; }
+    processOnStopRef.current = false;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try { mediaRecorderRef.current.stop(); } catch {}
+    }
+    mediaRecorderRef.current = null;
+    recordedChunksRef.current = [];
+  }, []);
+
+  // ── Stop any agent speech currently playing ─────────────────────────────────
+  const stopSpeaking = useCallback(() => {
+    speakGen.current++; // invalidate any pending onended restart
+    if (currentAudioRef.current) {
+      try { currentAudioRef.current.pause(); } catch {}
+      if (currentAudioRef.current.src) URL.revokeObjectURL(currentAudioRef.current.src);
+      currentAudioRef.current = null;
+    }
+    dispatch({ type: "SET_SPEAKING", v: false });
+  }, []);
+
+  // ── TTS — calls OpenAI (via edge function) for audio, stops the mic first ───
   const speak = useCallback((text: string, onEnd?: () => void) => {
-    // Always stop recognition before TTS (Chrome STT/TTS conflict)
-    if (debounceTimer.current) { clearTimeout(debounceTimer.current); debounceTimer.current = null; }
-    try { recognitionRef.current?.abort(); } catch {}
-    recognitionRef.current = null;
-    accumulatedFinals.current = "";
+    stopListening(); // never record while the agent is talking
+    stopSpeaking(); // cancel any utterance already in flight
+    const gen = speakGen.current;
 
-    if (!("speechSynthesis" in window)) { onEnd?.(); return; }
-    window.speechSynthesis.cancel();
-
-    const gen = ++speakGen.current; // tag this TTS invocation
-
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.lang = AGENT_LANG_LOCALE[stateRef.current.language] ?? "en-US";
-    utt.rate = 0.9;
-    utt.onstart = () => dispatch({ type: "SET_SPEAKING", v: true });
-    utt.onend = () => {
-      dispatch({ type: "SET_SPEAKING", v: false });
-      onEnd?.();
-      // Only restart if no newer speak() has been called (i.e. we're at end of chain)
-      setTimeout(() => {
-        if (gen === speakGen.current) {
-          const ph = stateRef.current.phase;
-          if (ph === "asking" || ph === "confirming") {
-            startListeningRef.current();
-          }
-        }
-      }, 180);
-    };
-    utt.onerror = () => { dispatch({ type: "SET_SPEAKING", v: false }); onEnd?.(); };
     dispatch({ type: "SET_SPEECH", text });
-    window.speechSynthesis.speak(utt);
-  }, []); // no deps — uses refs only
+    dispatch({ type: "SET_SPEAKING", v: true });
+
+    (async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("voice-agent-tts", {
+          body: { text },
+        });
+        if (error || !data) throw error ?? new Error("No audio returned");
+        if (gen !== speakGen.current) return; // superseded by a newer speak() call
+
+        const blob = new Blob([data as Blob], { type: "audio/mpeg" });
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        currentAudioRef.current = audio;
+
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          if (gen !== speakGen.current) return;
+          dispatch({ type: "SET_SPEAKING", v: false });
+          onEnd?.();
+          setTimeout(() => {
+            if (gen === speakGen.current) {
+              const ph = stateRef.current.phase;
+              if (ph === "asking" || ph === "confirming") startListeningRef.current();
+            }
+          }, 180);
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          if (gen !== speakGen.current) return;
+          dispatch({ type: "SET_SPEAKING", v: false });
+          onEnd?.();
+          setTimeout(() => {
+            if (gen === speakGen.current) {
+              const ph = stateRef.current.phase;
+              if (ph === "asking" || ph === "confirming") startListeningRef.current();
+            }
+          }, 180);
+        };
+        await audio.play();
+      } catch (err) {
+        console.error("TTS error:", err);
+        if (gen !== speakGen.current) return;
+        dispatch({ type: "SET_SPEAKING", v: false });
+        toast({
+          variant: "destructive",
+          title: "Voice unavailable",
+          description: "The agent couldn't speak that message, but you can still answer — read the text on screen.",
+        });
+        onEnd?.();
+        // Same restart-listening fallback as the normal audio.onended path —
+        // without it, a TTS failure leaves the mic badge saying "Listening"
+        // while no recording is actually happening.
+        setTimeout(() => {
+          if (gen === speakGen.current) {
+            const ph = stateRef.current.phase;
+            if (ph === "asking" || ph === "confirming") startListeningRef.current();
+          }
+        }, 180);
+      }
+    })();
+  }, [stopListening, stopSpeaking]);
 
   // ── Question helpers ────────────────────────────────────────────────────────
   const speakCurrentQuestion = useCallback(() => {
@@ -345,7 +433,7 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
           speak(tMsg("paused", lang));
           break;
         case "stop":
-          stopListening(); window.speechSynthesis?.cancel(); dispatch({ type: "STOP" });
+          stopListening(); stopSpeaking(); releaseMic(); dispatch({ type: "STOP" });
           break;
         case "help":
           speak(tMsg("helpText", lang));
@@ -396,84 +484,145 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
     }
   };
 
-  // ── Start recognition (fresh instance every call) ────────────────────────────
-  const startListening = useCallback(() => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      dispatch({ type: "SET_ERROR", msg: "Voice recognition is not supported in this browser. Please use Chrome or Edge." });
+  // ── Grab (or reuse) the mic stream ──────────────────────────────────────────
+  const ensureMicStream = useCallback(async (): Promise<MediaStream> => {
+    if (mediaStreamRef.current && mediaStreamRef.current.active) return mediaStreamRef.current;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaStreamRef.current = stream;
+    return stream;
+  }, []);
+
+  // ── Send a finished recording to OpenAI for transcription ───────────────────
+  const transcribeAndProcess = useCallback(async (blob: Blob) => {
+    dispatch({ type: "SET_MIC", status: "Processing" });
+    try {
+      const formData = new FormData();
+      formData.append("audio", blob, "audio.webm");
+      formData.append("language", stateRef.current.language);
+
+      const { data, error } = await supabase.functions.invoke("voice-agent-stt", { body: formData });
+      if (error) throw error;
+      const text = ((data as { text?: string })?.text ?? "").trim();
+
+      if (!text) {
+        const ph = stateRef.current.phase;
+        if ((ph === "asking" || ph === "confirming") && !stateRef.current.isSpeaking) startListeningRef.current();
+        else dispatch({ type: "SET_MIC", status: "Listening" });
+        return;
+      }
+
+      dispatch({ type: "SET_LIVE", text });
+      processTranscriptRef.current(text);
+    } catch (err) {
+      console.error("Transcription failed:", err);
+      const ph = stateRef.current.phase;
+      if ((ph === "asking" || ph === "confirming") && !stateRef.current.isSpeaking) startListeningRef.current();
+      else dispatch({ type: "SET_ERROR", msg: "Voice transcription failed. Please check your connection and try again." });
+    }
+  }, []);
+
+  // ── Start recording (fresh MediaRecorder cycle every call) ──────────────────
+  const startListening = useCallback(async () => {
+    if (!("mediaDevices" in navigator) || typeof MediaRecorder === "undefined") {
+      dispatch({ type: "SET_ERROR", msg: "Voice recording is not supported in this browser. Please use Chrome, Edge, or Safari." });
       return;
     }
-    // Flush any pending transcript before resetting — handles Chrome ending
-    // recognition naturally after delivering a final result (race with debounce)
-    if (debounceTimer.current) {
-      const pending = accumulatedFinals.current.trim();
-      clearTimeout(debounceTimer.current);
-      debounceTimer.current = null;
-      if (pending) {
-        accumulatedFinals.current = "";
-        processTranscriptRef.current(pending);
-        return; // processTranscript → speak() → restarts mic after TTS
-      }
+
+    stopListening(); // clear any previous cycle first
+
+    let stream: MediaStream;
+    try {
+      stream = await ensureMicStream();
+    } catch (e) {
+      dispatch({ type: "SET_ERROR", msg: "Microphone access was denied. Please allow microphone access and try again." });
+      return;
     }
 
-    // Always create a fresh instance — reusing the same instance after abort/end fails on Chrome
-    try { recognitionRef.current?.abort(); } catch {}
-    recognitionRef.current = null;
-    accumulatedFinals.current = "";
+    dispatch({ type: "SET_MIC", status: "Listening" });
 
-    const rec = new SR();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = AGENT_LANG_LOCALE[stateRef.current.language] ?? "en-US";
+    if (!audioCtxRef.current) {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      audioCtxRef.current = new AudioCtx();
+    }
+    const audioCtx = audioCtxRef.current;
+    if (audioCtx.state === "suspended") { try { await audioCtx.resume(); } catch {} }
 
-    rec.onresult = (event: any) => {
-      // No isSpeaking guard — we physically stop recognition before TTS starts
-      let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          accumulatedFinals.current += event.results[i][0].transcript + " ";
-        } else {
-          interim = event.results[i][0].transcript;
-        }
-      }
-      dispatch({ type: "SET_LIVE", text: (accumulatedFinals.current + interim).trim() });
+    const source = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    analyserRef.current = analyser;
+    const dataArray = new Uint8Array(analyser.fftSize);
 
-      if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      if (accumulatedFinals.current.trim()) {
-        const accumulated = accumulatedFinals.current.trim();
-        const delay = detectCommand(accumulated) ? 500 : 1400;
-        debounceTimer.current = window.setTimeout(() => {
-          const t = accumulatedFinals.current.trim();
-          if (!t) return;
-          accumulatedFinals.current = "";
-          dispatch({ type: "SET_LIVE", text: "" });
-          processTranscriptRef.current(t);
-        }, delay);
-      }
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    recordedChunksRef.current = [];
+    processOnStopRef.current = true;
+
+    recorder.ondataavailable = (e: BlobEvent) => {
+      if (e.data.size > 0) recordedChunksRef.current.push(e.data);
     };
 
-    rec.onerror = (e: any) => {
-      if (e.error === "no-speech" || e.error === "aborted") return;
-      console.warn("SpeechRecognition error:", e.error);
+    recorder.onstop = () => {
+      if (vadIntervalRef.current) { window.clearInterval(vadIntervalRef.current); vadIntervalRef.current = null; }
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+      if (noSpeechTimerRef.current) { clearTimeout(noSpeechTimerRef.current); noSpeechTimerRef.current = null; }
+      if (maxRecordTimerRef.current) { clearTimeout(maxRecordTimerRef.current); maxRecordTimerRef.current = null; }
+
+      const shouldProcess = processOnStopRef.current;
+      const chunks = recordedChunksRef.current;
+      recordedChunksRef.current = [];
+      if (!shouldProcess || chunks.length === 0) return;
+
+      const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
+      void transcribeAndProcess(blob);
     };
 
-    // onend: only auto-restart for unexpected ends (not caused by speak())
-    rec.onend = () => {
-      if (recognitionRef.current === rec) recognitionRef.current = null;
-      const s = stateRef.current;
-      if ((s.phase === "asking" || s.phase === "confirming") && !s.isSpeaking) {
-        setTimeout(() => {
-          const ph = stateRef.current.phase;
-          if ((ph === "asking" || ph === "confirming") && !stateRef.current.isSpeaking && !recognitionRef.current) {
-            startListeningRef.current();
-          }
-        }, 400);
+    mediaRecorderRef.current = recorder;
+    recorder.start();
+
+    let spokeDetected = false;
+    vadIntervalRef.current = window.setInterval(() => {
+      analyser.getByteTimeDomainData(dataArray);
+      let sumSquares = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const v = (dataArray[i] - 128) / 128;
+        sumSquares += v * v;
       }
-    };
+      const rms = Math.sqrt(sumSquares / dataArray.length);
 
-    recognitionRef.current = rec;
-    try { rec.start(); } catch (e) { console.error("rec.start failed:", e); }
-  }, []); // no deps — uses refs only
+      if (rms > SPEECH_RMS_THRESHOLD) {
+        spokeDetected = true;
+        if (noSpeechTimerRef.current) { clearTimeout(noSpeechTimerRef.current); noSpeechTimerRef.current = null; }
+        if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+      } else if (spokeDetected && !silenceTimerRef.current) {
+        silenceTimerRef.current = window.setTimeout(() => {
+          silenceTimerRef.current = null;
+          if (mediaRecorderRef.current === recorder && recorder.state !== "inactive") recorder.stop();
+        }, SILENCE_HOLD_MS);
+      }
+    }, 150);
+
+    // Nothing said at all — stop without transcribing and just listen again
+    // (mirrors the browser API's "no-speech" case).
+    noSpeechTimerRef.current = window.setTimeout(() => {
+      noSpeechTimerRef.current = null;
+      if (!spokeDetected && mediaRecorderRef.current === recorder && recorder.state !== "inactive") {
+        processOnStopRef.current = false;
+        recorder.stop();
+        const ph = stateRef.current.phase;
+        if ((ph === "asking" || ph === "confirming") && !stateRef.current.isSpeaking) startListeningRef.current();
+      }
+    }, NO_SPEECH_TIMEOUT_MS);
+
+    // Absolute cap so a stuck VAD can't record forever
+    maxRecordTimerRef.current = window.setTimeout(() => {
+      maxRecordTimerRef.current = null;
+      if (mediaRecorderRef.current === recorder && recorder.state !== "inactive") recorder.stop();
+    }, MAX_RECORD_MS);
+  }, [ensureMicStream, stopListening, transcribeAndProcess]);
 
   // Keep startListeningRef current
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
@@ -512,8 +661,8 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
 
   // ── Cleanup ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    return () => { stopListening(); window.speechSynthesis?.cancel(); };
-  }, [stopListening]);
+    return () => { stopListening(); stopSpeaking(); releaseMic(); };
+  }, [stopListening, stopSpeaking, releaseMic]);
 
   useEffect(() => {
     if (["paused", "idle", "form_complete", "section_end", "error"].includes(state.phase)) {
@@ -530,18 +679,20 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
 
   // ── Language picker (shared across idle + active views) ───────────────────
   const LangPicker = (
-    <div className="relative inline-flex items-center">
-      <Globe className="absolute left-2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-      <select
-        value={state.language}
-        onChange={e => dispatch({ type: "SET_LANG", lang: e.target.value as AgentLang })}
-        className="appearance-none pl-7 pr-6 py-1 text-xs rounded-md border border-border bg-muted/50 text-foreground hover:bg-accent cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/40"
-      >
-        {SUPPORTED_LANGUAGES.map(l => (
-          <option key={l.code} value={l.code}>{l.flag} {l.label}</option>
-        ))}
-      </select>
-      <ChevronDown className="absolute right-1.5 w-3 h-3 text-muted-foreground pointer-events-none" />
+    <div className="inline-flex items-center gap-1.5">
+      <div className="relative inline-flex items-center">
+        <Globe className="absolute left-2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+        <select
+          value={state.language}
+          onChange={e => dispatch({ type: "SET_LANG", lang: e.target.value as AgentLang })}
+          className="appearance-none pl-7 pr-6 py-1 text-xs rounded-md border border-border bg-muted/50 text-foreground hover:bg-accent cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/40"
+        >
+          {SUPPORTED_LANGUAGES.map(l => (
+            <option key={l.code} value={l.code}>{l.flag} {l.label}</option>
+          ))}
+        </select>
+        <ChevronDown className="absolute right-1.5 w-3 h-3 text-muted-foreground pointer-events-none" />
+      </div>
     </div>
   );
 
@@ -678,12 +829,13 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
             </Button>
           )}
           <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => {
-            stopListening(); window.speechSynthesis?.cancel(); dispatch({ type: "STOP" });
+            stopListening(); stopSpeaking(); releaseMic(); dispatch({ type: "STOP" });
           }}>
             <X className="w-3.5 h-3.5" />
           </Button>
         </div>
       </div>
+
 
       {/* Progress bar */}
       <div className="px-4 pt-2 pb-1 shrink-0">

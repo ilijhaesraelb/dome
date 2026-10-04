@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>D.O.M.E. API Explorer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./vendor/swagger-ui/swagger-ui.css" />
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
+
+    #auth-panel {
+      background: #1b1f27;
+      color: #e8eaed;
+      padding: 14px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      font-size: 13px;
+      border-bottom: 3px solid #49cc90;
+    }
+    #auth-panel h1 {
+      font-size: 15px;
+      margin: 0 20px 0 0;
+      white-space: nowrap;
+      color: #fff;
+    }
+    #auth-panel label {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 11px;
+      color: #9aa4b2;
+    }
+    #auth-panel input {
+      background: #2a2f3a;
+      border: 1px solid #3c4250;
+      color: #fff;
+      border-radius: 4px;
+      padding: 6px 8px;
+      font-size: 13px;
+      min-width: 200px;
+    }
+    #auth-panel button {
+      background: #49cc90;
+      border: none;
+      color: #10151d;
+      font-weight: 600;
+      border-radius: 4px;
+      padding: 8px 14px;
+      cursor: pointer;
+      align-self: flex-end;
+    }
+    #auth-panel button:hover { background: #5fe3a6; }
+    #auth-panel button:disabled { background: #3c4250; color: #9aa4b2; cursor: wait; }
+    #auth-status {
+      align-self: flex-end;
+      font-size: 12px;
+      max-width: 420px;
+    }
+    #auth-status.ok { color: #49cc90; }
+    #auth-status.err { color: #f93e3e; }
+    #auth-panel details {
+      align-self: flex-end;
+      color: #9aa4b2;
+    }
+    #auth-panel summary { cursor: pointer; }
+    #auth-panel .note {
+      flex-basis: 100%;
+      color: #9aa4b2;
+      font-size: 11.5px;
+      line-height: 1.5;
+    }
+    #swagger-ui { max-width: 1460px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <div id="auth-panel">
+    <h1>D.O.M.E. API Explorer</h1>
+
+    <label>Supabase URL
+      <input id="sb-url" value="https://uzxjgdfhqrwejzbzoojy.supabase.co" size="34" />
+    </label>
+    <label>Publishable / anon key
+      <input id="sb-anon" value="sb_publishable_9e_-yHyT3ZbxTF07iO4hFQ_p5WwiOG8" size="34" />
+    </label>
+    <label>Email
+      <input id="sb-email" type="email" placeholder="you@example.com" />
+    </label>
+    <label>Password
+      <input id="sb-password" type="password" />
+    </label>
+    <button id="sb-signin">Sign in &amp; authorize</button>
+    <span id="auth-status"></span>
+
+    <details>
+      <summary>Use an existing token instead</summary>
+      <label style="margin-top: 6px;">Access token
+        <input id="sb-token" placeholder="eyJhbGciOi..." size="34" />
+      </label>
+      <button id="sb-apply-token" type="button" style="margin-top: 4px;">Apply token</button>
+    </details>
+
+    <div class="note">
+      Signing in fetches a real user access token from Supabase Auth and feeds it into
+      Swagger's <strong>Authorize</strong> dialog (bearerAuth) automatically, plus attaches
+      it &amp; the publishable key as headers on every "Try it out" call. Endpoints that don't
+      require auth work without signing in. This page never sends your password anywhere
+      except directly to your own Supabase project's auth endpoint.
+    </div>
+  </div>
+
+  <div id="swagger-ui"></div>
+
+  <script src="./vendor/swagger-ui/swagger-ui-bundle.js"></script>
+  <script type="module">
+    let accessToken = null;
+
+    const ui = SwaggerUIBundle({
+      url: "./openapi.yaml",
+      dom_id: "#swagger-ui",
+      presets: [SwaggerUIBundle.presets.apis],
+      layout: "BaseLayout",
+      deepLinking: true,
+      requestInterceptor: (req) => {
+        const anonKey = document.getElementById("sb-anon").value.trim();
+        if (anonKey) req.headers["apikey"] = anonKey;
+        if (accessToken) {
+          req.headers["Authorization"] = `Bearer ${accessToken}`;
+        } else if (anonKey && !req.headers["Authorization"]) {
+          req.headers["Authorization"] = `Bearer ${anonKey}`;
+        }
+        return req;
+      },
+    });
+
+    const statusEl = document.getElementById("auth-status");
+    const setStatus = (msg, ok) => {
+      statusEl.textContent = msg;
+      statusEl.className = ok === undefined ? "" : ok ? "ok" : "err";
+    };
+
+    document.getElementById("sb-signin").addEventListener("click", async () => {
+      const btn = document.getElementById("sb-signin");
+      const url = document.getElementById("sb-url").value.trim();
+      const anon = document.getElementById("sb-anon").value.trim();
+      const email = document.getElementById("sb-email").value.trim();
+      const password = document.getElementById("sb-password").value;
+
+      if (!url || !anon || !email || !password) {
+        setStatus("Fill in URL, key, email and password first.", false);
+        return;
+      }
+
+      btn.disabled = true;
+      setStatus("Signing in…");
+      try {
+        const res = await fetch(`${url.replace(/\/$/, "")}/auth/v1/token?grant_type=password`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: anon },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error_description || data.msg || `HTTP ${res.status}`);
+        accessToken = data.access_token;
+        ui.preauthorizeApiKey("bearerAuth", accessToken);
+        setStatus(`Signed in as ${email} — token applied to Authorize + all requests.`, true);
+      } catch (e) {
+        setStatus(`Sign-in failed: ${e.message || e}`, false);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("sb-apply-token").addEventListener("click", () => {
+      const token = document.getElementById("sb-token").value.trim();
+      if (!token) {
+        setStatus("Paste a token first.", false);
+        return;
+      }
+      accessToken = token;
+      ui.preauthorizeApiKey("bearerAuth", accessToken);
+      setStatus("Token applied to Authorize + all requests.", true);
+    });
+  </script>
+</body>
+</html>

@@ -2,7 +2,7 @@ import { Link, useLocation, Outlet } from "react-router-dom";
 import {
   Home, FileText, Shield, Download, HelpCircle, Clock,
   MessageSquare, Settings, Bell, BellOff, FolderOpen,
-  Menu, ChevronLeft, LogOut, Calculator, Rocket,
+  Menu, ChevronLeft, LogOut, Calculator, Rocket, Search,
 } from "lucide-react";
 import AffiliateNotificationBell from "@/components/referrals/AffiliateNotificationBell";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,7 @@ const NAV_ITEMS = [
   { to: "/portal/forms", icon: FileText, label: "My Forms" },
   { to: "/portal/passport", icon: Shield, label: "My Profile" },
   { to: "/portal/documents", icon: FolderOpen, label: "Documents" },
+  { to: "/portal/case-status", icon: Search, label: "Case Status" },
   { to: "/portal/messages", icon: MessageSquare, label: "Messages" },
   { to: "/tax", icon: Calculator, label: "Tax Services" },
   { to: "/portal/timeline", icon: Clock, label: "Timeline" },

@@ -1,0 +1,1336 @@
+openapi: 3.0.3
+info:
+  title: D.O.M.E. (Pathfinder Global) API
+  description: |
+    API surface for the D.O.M.E. immigration/tax assistance platform.
+
+    Every endpoint here is a **Supabase Edge Function** (Deno runtime), not a traditional
+    REST server — there is no central router, no path parameters, and (with the two
+    exceptions noted below) every function accepts `POST` only, at:
+
+    ```
+    https://<project-ref>.supabase.co/functions/v1/<function-name>
+    ```
+
+    Notes that apply across all endpoints unless stated otherwise:
+    - All functions respond to `OPTIONS` with CORS headers (`Access-Control-Allow-Origin: *`).
+    - Auth is via a Supabase-issued JWT sent as `Authorization: Bearer <token>`. Several
+      functions perform this check themselves in code (via `supabase.auth.getUser()` /
+      `getClaims()`); the Supabase gateway's own `verify_jwt` is disabled
+      (`verify_jwt = false` in `supabase/config.toml`) for most of them, so the
+      per-function checks documented below are authoritative.
+    - Unhandled errors return `500` with `{ "error": "Internal server error" }` (message
+      text varies slightly per function).
+    - Two functions (`notify-deadlines`, `notify-new-message`) are **not** called from the
+      client — they're invoked by a cron job / Postgres trigger using the service-role key
+      and are documented here for completeness only.
+    - Three functions (`explain-question`, `immigration-assistant`, `tax-assistant`) stream
+      a chat completion back as Server-Sent Events (`text/event-stream`) rather than a
+      single JSON payload.
+  version: "1.0.0"
+servers:
+  - url: https://{projectRef}.supabase.co/functions/v1
+    variables:
+      projectRef:
+        default: uzxjgdfhqrwejzbzoojy
+        description: Supabase project ref (see src/integrations/supabase/client.ts)
+
+tags:
+  - name: AI Assistants
+    description: LLM-backed chat, feedback, and analysis endpoints (Lovable AI Gateway / Gemini)
+  - name: Pathway Engine
+    description: Immigration pathway eligibility wizard
+  - name: Billing
+    description: Stripe checkout, subscriptions, and payment verification
+  - name: Documents & Tax
+    description: Tax document extraction, mapping, and filing recommendations
+  - name: USCIS Integration
+    description: Case status and office locator proxies to USCIS
+  - name: Notifications
+    description: Web Push subscription management and delivery
+
+security:
+  - bearerAuth: []
+
+paths:
+  /business-formation-guide:
+    post:
+      tags: [AI Assistants]
+      summary: Get AI-generated business formation guidance
+      description: Generates guidance text for forming a business entity in a given US state, via the Lovable AI Gateway (Gemini).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, entityType]
+              properties:
+                state:
+                  type: string
+                  description: US state code or name
+                  example: "CA"
+                entityType:
+                  type: string
+                  description: Entity type (e.g. LLC, S-Corp, C-Corp, Sole Proprietorship)
+                  example: "LLC"
+                businessName:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Guidance generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  guidance:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "402":
+          $ref: "#/components/responses/CreditsExhausted"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /check-subscription:
+    post:
+      tags: [Billing]
+      summary: Check the caller's Stripe subscription status
+      description: Looks up the authenticated user's Stripe customer by email and returns whether they have an active subscription.
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: No body fields required — the caller's identity comes from the JWT.
+      responses:
+        "200":
+          description: Subscription status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscribed:
+                    type: boolean
+                  product_id:
+                    type: string
+                    nullable: true
+                  subscription_end:
+                    type: string
+                    format: date-time
+                    nullable: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /create-checkout:
+    post:
+      tags: [Billing]
+      summary: Create a Stripe Checkout session
+      description: |
+        Creates a Stripe Checkout Session for a subscription purchase, a one-time
+        donation, or a tax-filing payment. Donations are allowed without
+        authentication (`guest_email` path); all other modes require a Bearer JWT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                price_id:
+                  type: string
+                  description: Stripe Price ID (required unless donation_amount is set)
+                mode:
+                  type: string
+                  enum: [payment, subscription]
+                  default: payment
+                donation_amount:
+                  type: number
+                  description: Donation amount in whole dollars; presence makes this a donation checkout (no auth required)
+                guest_email:
+                  type: string
+                  format: email
+                  nullable: true
+                tax_file_id:
+                  type: string
+                  format: uuid
+                  description: If set, checkout is tied to a tax filing payment and success_url embeds {CHECKOUT_SESSION_ID}
+      responses:
+        "200":
+          description: Checkout session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                    description: Stripe-hosted checkout URL to redirect the browser to
+        "401":
+          description: Authentication required (non-donation checkout without a valid JWT)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /customer-portal:
+    post:
+      tags: [Billing]
+      summary: Create a Stripe customer billing portal session
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: No body fields required.
+      responses:
+        "200":
+          description: Billing portal session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /verify-tax-payment:
+    post:
+      tags: [Billing]
+      summary: Verify a Stripe Checkout session and mark a tax file as paid
+      description: |
+        Server-side verification of payment (never trust the client-side redirect alone).
+        Enforces that the authenticated caller owns the `tax_file_id`. Idempotent — calling
+        again after a file is already marked paid returns `already_paid: true` without
+        re-charging or re-writing.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, tax_file_id]
+              properties:
+                session_id:
+                  type: string
+                  description: Stripe Checkout Session ID
+                tax_file_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Verification result (verified true/false depending on Stripe payment_status)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified:
+                    type: boolean
+                  payment_status:
+                    type: string
+                    example: "paid"
+                  amount_cents:
+                    type: integer
+                    nullable: true
+                  already_paid:
+                    type: boolean
+        "400":
+          description: Missing session_id or tax_file_id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller does not own this tax file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Tax file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /pathway-engine:
+    post:
+      tags: [Pathway Engine]
+      summary: Action router for the immigration pathway-finder wizard
+      description: |
+        Single endpoint dispatched by the `action` field. Evaluates JSON-logic
+        eligibility/disqualifier/score rules stored in Postgres (`pathway_rules`) against
+        session answers (`pathway_answers`), and persists an audit trail
+        (`pathway_rule_audit`). `create_session` and `next_question`/`answer`/`get_results`
+        differ in auth requirements — see below.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/PathwayCreateSessionRequest"
+                - $ref: "#/components/schemas/PathwayAnswerRequest"
+                - $ref: "#/components/schemas/PathwayGetResultsRequest"
+                - $ref: "#/components/schemas/PathwayStartCaseRequest"
+              discriminator:
+                propertyName: action
+      responses:
+        "200":
+          description: Response shape depends on the action (see schema)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PathwaySessionCreated"
+                  - $ref: "#/components/schemas/PathwayQuestion"
+                  - $ref: "#/components/schemas/PathwayResults"
+                  - $ref: "#/components/schemas/PathwayCaseStarted"
+        "400":
+          description: Unknown action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Caller does not own this session, or (for start_case) is not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /document-intelligence:
+    post:
+      tags: [AI Assistants]
+      summary: AI quality assessment of uploaded immigration documents
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documents]
+              properties:
+                documents:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [name, category]
+                    properties:
+                      name:
+                        type: string
+                      category:
+                        type: string
+                      file_type:
+                        type: string
+                        nullable: true
+                      file_size:
+                        type: integer
+                        nullable: true
+                        description: Bytes
+                      status:
+                        type: string
+                        nullable: true
+      responses:
+        "200":
+          description: Structured document analysis (tool-call output from the LLM)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  analyses:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        status: { type: string, enum: [good, needs_attention, missing] }
+                        notes: { type: string }
+                  missing_documents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        reason: { type: string }
+                        priority: { type: string, enum: [required, recommended] }
+                  recommendations:
+                    type: array
+                    items: { type: string }
+                  overall_score:
+                    type: number
+                    minimum: 0
+                    maximum: 100
+        "400":
+          description: No documents provided
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "402":
+          $ref: "#/components/responses/CreditsExhausted"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /english-voice-feedback:
+    post:
+      tags: [AI Assistants]
+      summary: Score a spoken-English practice transcript
+      description: Used by the English-learning voice-agent feature to grade pronunciation, grammar, vocabulary, and fluency.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transcript]
+              properties:
+                transcript:
+                  type: string
+                target_phrase:
+                  type: string
+                  nullable: true
+                scenario:
+                  type: string
+                  nullable: true
+                level:
+                  type: string
+                  enum: [beginner, intermediate, advanced]
+                  default: beginner
+      responses:
+        "200":
+          description: Scored feedback
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pronunciation_score: { type: number, minimum: 0, maximum: 100 }
+                  grammar_score: { type: number, minimum: 0, maximum: 100 }
+                  vocabulary_score: { type: number, minimum: 0, maximum: 100 }
+                  fluency_score: { type: number, minimum: 0, maximum: 100 }
+                  overall_score: { type: number, minimum: 0, maximum: 100 }
+                  feedback: { type: string }
+                  corrections:
+                    type: array
+                    maxItems: 3
+                    items:
+                      type: object
+                      properties:
+                        original: { type: string }
+                        corrected: { type: string }
+                        explanation: { type: string }
+                  suggested_response: { type: string }
+                  next_prompt: { type: string }
+        "400":
+          description: No transcript provided
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "402":
+          $ref: "#/components/responses/CreditsExhausted"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /explain-question:
+    post:
+      tags: [AI Assistants]
+      summary: Stream a plain-language explanation of a form question
+      description: |
+        Returns a `text/event-stream` chat completion stream (OpenAI-style SSE chunks),
+        not a single JSON body. Called via raw `fetch`, not the Supabase SDK helper.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string }
+                formType: { type: string, nullable: true }
+                fieldKey: { type: string, nullable: true }
+                language: { type: string, nullable: true, description: "ISO 639-1 code, e.g. es, fr, zh" }
+      responses:
+        "200":
+          description: SSE stream of chat completion chunks
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /immigration-assistant:
+    post:
+      tags: [AI Assistants]
+      summary: Stream a chat reply from the D.O.M.E. Immigration Pathway Advisor
+      description: Multi-turn, multi-language streaming chatbot for guided pathway discovery. Returns `text/event-stream`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                messages:
+                  type: array
+                  maxItems: 20
+                  description: Combined content capped at 10,000 characters
+                  items:
+                    $ref: "#/components/schemas/ChatMessage"
+      responses:
+        "200":
+          description: SSE stream of chat completion chunks
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tax-assistant:
+    post:
+      tags: [AI Assistants]
+      summary: Stream a contextual AI tax-prep assistant reply
+      description: |
+        Streaming (`text/event-stream`) chat endpoint for the tax-filing assistant.
+        No Bearer-token check is enforced in code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                messages:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ChatMessage"
+                context:
+                  type: object
+                  nullable: true
+                  properties:
+                    filingType: { type: string, nullable: true }
+                    taxYear: { type: string, nullable: true }
+                    currentSection: { type: string, nullable: true }
+                    currentField: { type: string, nullable: true }
+                    uploadedDocs: { type: array, items: { type: string }, nullable: true }
+                    errors: { type: array, items: { type: string }, nullable: true }
+                    fieldValue: { type: string, nullable: true }
+                    extractedValue: { type: string, nullable: true }
+                mode:
+                  type: string
+                  enum: [beginner, professional]
+                  default: beginner
+      responses:
+        "200":
+          description: SSE stream of chat completion chunks
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tax-csv-suggest-mapping:
+    post:
+      tags: [Documents & Tax]
+      summary: AI-suggested CSV column mapping for bookkeeping imports
+      description: Suggests how a CSV's columns map to tax categories, with per-column confidence and derived category rules. No auth enforced in code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [headers]
+              properties:
+                headers:
+                  type: array
+                  items: { type: string }
+                sampleRows:
+                  type: array
+                  items:
+                    type: array
+                    items: { type: string }
+                  nullable: true
+                filingType:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Suggested mapping
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  column_map:
+                    type: object
+                    additionalProperties: { type: string }
+                  column_confidence:
+                    type: object
+                    additionalProperties: { type: number }
+                  category_rules:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        if_column: { type: string }
+                        contains: { type: string }
+                        then_category: { type: string }
+                  overall_confidence: { type: number }
+                  allowed_categories:
+                    type: array
+                    items: { type: string }
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tax-document-analysis:
+    post:
+      tags: [Documents & Tax]
+      summary: Recommend a filing type from a tax file's uploaded documents
+      description: |
+        Analyzes a tax file's documents, writes a recommendation row
+        (`tax_filing_recommendations`) and updates document/file status. Uses a
+        service-role DB client internally; no Bearer check in code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [taxFileId]
+              properties:
+                taxFileId:
+                  type: string
+                  format: uuid
+                documentIds:
+                  type: array
+                  items: { type: string, format: uuid }
+                  nullable: true
+      responses:
+        "200":
+          description: Filing type recommendation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recommendation:
+                    type: object
+                    properties:
+                      filing_type: { type: string }
+                      confidence: { type: number }
+                      explanation: { type: string }
+                  warnings:
+                    type: array
+                    items: { type: string }
+                  documents_classified:
+                    type: integer
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tax-extract-document:
+    post:
+      tags: [Documents & Tax]
+      summary: Extract structured fields from a single tax document
+      description: |
+        Layer-2 field extraction for a single uploaded document (W-2/1099/990/1120 and
+        similar forms, using hardcoded field maps). Writes `tax_document_extractions` and
+        upserts `tax_field_values` rows flagged `ai_needs_review`. No Bearer check in code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documentId]
+              properties:
+                documentId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Extraction result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  extraction_id: { type: string, format: uuid }
+                  doc_type: { type: string }
+                  detected_tax_year: { type: string, nullable: true }
+                  mapped_count: { type: integer }
+                  unmapped_count: { type: integer }
+                  unmapped_keys:
+                    type: array
+                    items: { type: string }
+                  values_inserted: { type: integer }
+                  confidence: { type: number }
+                  warnings:
+                    type: array
+                    items: { type: string }
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /translate-message:
+    post:
+      tags: [AI Assistants]
+      summary: Translate, simplify, or detect the language of text
+      description: Supports 11 languages (en, es, pt, fr, ht, ar, zh, ja, ur, hi, de). Public — no auth enforced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text, targetLang]
+              properties:
+                text:
+                  type: string
+                sourceLang:
+                  type: string
+                  nullable: true
+                  description: ISO 639-1 code; omitted/auto for mode=detect
+                targetLang:
+                  type: string
+                  description: ISO 639-1 code
+                mode:
+                  type: string
+                  enum: [translate, explain, detect]
+                  default: translate
+      responses:
+        "200":
+          description: Translation/explanation/detection result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    description: Translated text, simplified text, or (mode=detect) a bare ISO 639-1 code
+                  sourceLang: { type: string }
+                  targetLang: { type: string }
+                  mode: { type: string }
+        "400":
+          description: text and targetLang are required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "402":
+          $ref: "#/components/responses/CreditsExhausted"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /uscis-case-status:
+    post:
+      tags: [USCIS Integration]
+      summary: Look up a case's status from the official USCIS Case Status API
+      description: |
+        Proxies USCIS's OAuth2 client-credentials-protected Case Status API. The access
+        token is cached in-memory per function instance until near expiry.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receiptNumber]
+              properties:
+                receiptNumber:
+                  type: string
+                  pattern: "^[a-zA-Z]{3}\\d{10}$"
+                  example: "EAC9999103403"
+      responses:
+        "200":
+          description: Raw USCIS case-status payload (schema controlled by USCIS, passed through as-is)
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: receiptNumber is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Access denied by USCIS API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/USCISError"
+        "404":
+          description: No case found for that receipt number
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/USCISError"
+        "422":
+          description: Invalid receipt number format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/USCISError"
+        "429":
+          description: Too many requests to the USCIS API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/USCISError"
+        "503":
+          description: USCIS Case Status API unavailable (service hours Mon–Fri 7am–8pm EST)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/USCISError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /uscis-locator:
+    post:
+      tags: [USCIS Integration]
+      summary: Find nearby USCIS field offices, Application Support Centers, or embassies
+      description: |
+        Tries USCIS's public office-locator endpoint first; on any failure (non-2xx or
+        network error) falls back to a hardcoded curated dataset of ~19 offices with
+        haversine-distance sorting, capped to the 10 nearest. Public — no auth enforced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Must provide either zipCode, or both lat and lng.
+              properties:
+                zipCode:
+                  type: string
+                  nullable: true
+                lat:
+                  type: number
+                  nullable: true
+                lng:
+                  type: number
+                  nullable: true
+                officeType:
+                  type: string
+                  enum: [uscis, asc, embassy, all]
+                  default: all
+      responses:
+        "200":
+          description: Offices found (source indicates whether from the live USCIS API or the curated fallback)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/USCISOffice"
+                  source:
+                    type: string
+                    enum: [uscis_api, curated]
+        "400":
+          description: Neither zipCode nor lat/lng provided
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, enum: [false] }
+                  error: { type: string }
+        "500":
+          description: Unexpected internal error (only reached if even the curated fallback throws)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, enum: [false] }
+                  error: { type: string }
+
+  /push-notifications:
+    post:
+      tags: [Notifications]
+      summary: Action router for Web Push subscription management and sending
+      description: |
+        Single endpoint dispatched by the `action` field. VAPID keys are lazily
+        generated on first use and persisted in the `vapid_keys` table.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/PushGetPublicKeyRequest"
+                - $ref: "#/components/schemas/PushSubscribeRequest"
+                - $ref: "#/components/schemas/PushUnsubscribeRequest"
+                - $ref: "#/components/schemas/PushSendRequest"
+              discriminator:
+                propertyName: action
+      responses:
+        "200":
+          description: Response shape depends on the action
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      publicKey: { type: string }
+                  - type: object
+                    properties:
+                      success: { type: boolean }
+                  - type: object
+                    properties:
+                      sent: { type: integer }
+                      failed: { type: integer }
+        "400":
+          description: Unknown action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing/invalid Bearer token (subscribe, unsubscribe, send)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: "Caller lacks admin/practitioner role (send action only)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /notify-deadlines:
+    post:
+      tags: [Notifications]
+      summary: "[Internal/cron only] Push-notify participants of cases with deadlines in the next 3 days"
+      description: |
+        Not called by the frontend. Intended to be invoked on a schedule with the
+        Supabase service-role key as the Bearer token.
+      security:
+        - serviceRoleAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: No body required.
+      responses:
+        "200":
+          description: Notifications sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent: { type: integer }
+                  cases: { type: integer }
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /notify-new-message:
+    post:
+      tags: [Notifications]
+      summary: "[Internal/DB-trigger only] Push-notify case participants of a new message"
+      description: |
+        Not called by the frontend. Invoked by a Postgres trigger
+        (`notify_new_message()`, see `supabase/migrations/20260307200454_*.sql`) via
+        `pg_net.http_post` whenever a row is inserted into the case-messages table, using
+        the service-role key.
+      security:
+        - serviceRoleAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [record]
+              properties:
+                record:
+                  type: object
+                  properties:
+                    case_id: { type: string, format: uuid }
+                    sender_id: { type: string, format: uuid }
+                    sender_name: { type: string }
+                    content: { type: string }
+      responses:
+        "200":
+          description: Notification sent, or skipped (e.g. no other participants / no subscriptions)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      sent: { type: integer }
+                  - type: object
+                    properties:
+                      skipped: { type: boolean, enum: [true] }
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase user-session access token (`supabase.auth.getSession().access_token`)
+    serviceRoleAuth:
+      type: http
+      scheme: bearer
+      description: Supabase service-role key — for trusted server/cron/trigger callers only, never exposed to the client
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    RateLimited:
+      description: AI gateway rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    CreditsExhausted:
+      description: AI gateway credits exhausted
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Unhandled server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    USCISError:
+      allOf:
+        - $ref: "#/components/schemas/Error"
+        - type: object
+          properties:
+            code:
+              type: integer
+              description: Mirrors the upstream USCIS HTTP status code
+
+    ChatMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+
+    USCISOffice:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [uscis, embassy, asc] }
+        address: { type: string }
+        city: { type: string }
+        state: { type: string }
+        zip: { type: string }
+        country: { type: string }
+        phone: { type: string }
+        hours: { type: string }
+        services:
+          type: array
+          items: { type: string }
+        website: { type: string, format: uri }
+        distance:
+          type: string
+          nullable: true
+          example: "3.2 mi"
+        lat: { type: number, nullable: true }
+        lng: { type: number, nullable: true }
+
+    # ---- pathway-engine request variants ----
+    PathwayCreateSessionRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [create_session]
+        locale:
+          type: string
+          default: en
+      description: Auth optional — attaches user_id if a valid Bearer token is present, otherwise creates an anonymous session.
+
+    PathwayAnswerRequest:
+      type: object
+      required: [action, session_id]
+      properties:
+        action:
+          type: string
+          enum: [next_question, answer]
+        session_id:
+          type: string
+          format: uuid
+        question_id:
+          type: string
+          nullable: true
+        answer_value:
+          description: Any JSON-serializable answer value (string, number, boolean, array, or object)
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: array
+              items: {}
+            - type: object
+        source:
+          type: string
+          default: TYPED
+          nullable: true
+        confidence:
+          type: number
+          default: 1.0
+          nullable: true
+        locale:
+          type: string
+          default: en
+      description: |
+        If the caller's Bearer token belongs to a different user than the session's
+        owner, returns 401. Returns either the next question or, once all applicable
+        questions are answered, falls through to results (same shape as get_results).
+
+    PathwayGetResultsRequest:
+      type: object
+      required: [action, session_id]
+      properties:
+        action:
+          type: string
+          enum: [get_results]
+        session_id:
+          type: string
+          format: uuid
+
+    PathwayStartCaseRequest:
+      type: object
+      required: [action, session_id, pathway_id]
+      properties:
+        action:
+          type: string
+          enum: [start_case]
+        session_id:
+          type: string
+          format: uuid
+        pathway_id:
+          type: string
+      description: Requires a valid Bearer token — creates a case, case_participants row, and one form_instance per pathway form, then marks the session complete.
+
+    # ---- pathway-engine response variants ----
+    PathwaySessionCreated:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+
+    PathwayQuestion:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [question]
+        question:
+          type: object
+          description: Row from the `questions` table (localized to the session's locale if set)
+        progress:
+          type: integer
+          description: Number of questions answered so far
+
+    PathwayResults:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [results]
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              pathway_id: { type: string }
+              display_name: { type: string }
+              category: { type: string }
+              description: { type: string }
+              requires_rep_review: { type: boolean }
+              status:
+                type: string
+                enum: [STRONG, POSSIBLE, NEEDS_INFO, NOT_ELIGIBLE]
+              score:
+                type: integer
+                minimum: 0
+                maximum: 100
+              reasons:
+                type: array
+                items: { type: string }
+              risk_flags:
+                type: array
+                items: { type: string }
+
+    PathwayCaseStarted:
+      type: object
+      properties:
+        case_id:
+          type: string
+          format: uuid
+        case_number:
+          type: string
+          example: "DOME-LK3J9F2A"
+
+    # ---- push-notifications request variants ----
+    PushGetPublicKeyRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [get-public-key]
+      description: Public — no auth required.
+
+    PushSubscribeRequest:
+      type: object
+      required: [action, subscription]
+      properties:
+        action:
+          type: string
+          enum: [subscribe]
+        subscription:
+          type: object
+          required: [endpoint, keys]
+          properties:
+            endpoint:
+              type: string
+              format: uri
+            keys:
+              type: object
+              required: [p256dh, auth]
+              properties:
+                p256dh: { type: string }
+                auth: { type: string }
+      description: Requires Bearer JWT — user_id comes from the token, not the body.
+
+    PushUnsubscribeRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [unsubscribe]
+      description: Requires Bearer JWT — deletes all subscriptions for the caller's user_id.
+
+    PushSendRequest:
+      type: object
+      required: [action, title, body]
+      properties:
+        action:
+          type: string
+          enum: [send]
+        userId:
+          type: string
+          format: uuid
+          nullable: true
+          description: If omitted, sends to all subscribed users
+        title:
+          type: string
+        body:
+          type: string
+        url:
+          type: string
+          nullable: true
+        tag:
+          type: string
+          nullable: true
+      description: Requires Bearer JWT belonging to an admin or practitioner (checked via the has_role RPC).

@@ -133,6 +133,31 @@ export function useCasePayments(caseId: string | undefined) {
   });
 }
 
+export function useCaseFilings(caseId: string | undefined) {
+  return useQuery({
+    queryKey: ["case-filings", caseId],
+    queryFn: async () => {
+      const { data: personRows, error: personError } = await supabase
+        .from("persons_safe")
+        .select("id")
+        .eq("case_id", caseId!);
+      if (personError) throw personError;
+
+      const personIds = (personRows || []).map((p) => p.id).filter(Boolean) as string[];
+      if (personIds.length === 0) return [];
+
+      const { data, error } = await supabase
+        .from("immigration_filings")
+        .select("*")
+        .in("person_id", personIds)
+        .order("filing_date", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!caseId,
+  });
+}
+
 export function useCaseNotes(caseId: string | undefined) {
   return useQuery({
     queryKey: ["case-notes", caseId],

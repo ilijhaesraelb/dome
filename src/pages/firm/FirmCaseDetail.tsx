@@ -12,13 +12,13 @@ import {
   ArrowLeft, FileText, User, Shield, MessageSquare, StickyNote,
   Clock, Send, Pin, Upload, AlertTriangle, BarChart3, CheckSquare,
   Globe, DollarSign, Loader2, FileDown, Eye, Pencil, Users,
-  ArrowUpRight, Bell, CalendarDays, Search, Plus, ExternalLink,
+  ArrowUpRight, Bell, CalendarDays, Search, Plus, ExternalLink, Receipt,
 } from "lucide-react";
 import ExportPacketDialog from "@/components/ExportPacketDialog";
 import {
   useCase, useCaseFormInstances, useCaseDocuments, useCaseTimeline,
   useCaseMessages, useCasePayments, useCaseNotes, useCaseConsistencyIssues,
-  useCasePersons, useSendMessage,
+  useCasePersons, useCaseFilings, useSendMessage,
 } from "@/hooks/useCases";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -67,6 +67,10 @@ const FirmCaseDetail = () => {
   const [noteInput, setNoteInput] = useState("");
   const [noteType, setNoteType] = useState("attorney");
   const [searchQuery, setSearchQuery] = useState("");
+  const [filingPersonId, setFilingPersonId] = useState("");
+  const [filingFormType, setFilingFormType] = useState("");
+  const [filingReceiptNumber, setFilingReceiptNumber] = useState("");
+  const [addingFiling, setAddingFiling] = useState(false);
 
   const { data: caseData, isLoading } = useCase(id);
   const { data: formInstances } = useCaseFormInstances(id);
@@ -77,6 +81,7 @@ const FirmCaseDetail = () => {
   const { data: notes } = useCaseNotes(id);
   const { data: issues } = useCaseConsistencyIssues(id);
   const { data: persons } = useCasePersons(id);
+  const { data: filings } = useCaseFilings(id);
   const sendMessage = useSendMessage(id || "");
 
   if (isLoading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
@@ -110,6 +115,23 @@ const FirmCaseDetail = () => {
     setNoteInput("");
     queryClient.invalidateQueries({ queryKey: ["case-notes", id] });
     toast({ title: "Note added" });
+  };
+
+  const handleAddFiling = async () => {
+    const personId = filingPersonId || beneficiary?.id || petitioner?.id;
+    if (!filingFormType.trim() || !personId) return;
+    setAddingFiling(true);
+    const { error } = await supabase.from("immigration_filings").insert({
+      person_id: personId,
+      form_type: filingFormType.trim(),
+      receipt_number: filingReceiptNumber.trim() || null,
+    });
+    setAddingFiling(false);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    setFilingFormType("");
+    setFilingReceiptNumber("");
+    queryClient.invalidateQueries({ queryKey: ["case-filings", id] });
+    toast({ title: "Filing recorded" });
   };
 
   /* ── Readiness calc ── */
@@ -171,6 +193,7 @@ const FirmCaseDetail = () => {
                 <TabsTrigger value="client" className="gap-1 text-xs sm:text-sm"><User className="w-3.5 h-3.5" />Client</TabsTrigger>
                 <TabsTrigger value="forms" className="gap-1 text-xs sm:text-sm"><FileText className="w-3.5 h-3.5" />Forms</TabsTrigger>
                 <TabsTrigger value="documents" className="gap-1 text-xs sm:text-sm"><Shield className="w-3.5 h-3.5" />Documents</TabsTrigger>
+                <TabsTrigger value="filings" className="gap-1 text-xs sm:text-sm"><Receipt className="w-3.5 h-3.5" />Filings</TabsTrigger>
                 <TabsTrigger value="tasks" className="gap-1 text-xs sm:text-sm"><CheckSquare className="w-3.5 h-3.5" />Tasks</TabsTrigger>
                 <TabsTrigger value="messages" className="gap-1 text-xs sm:text-sm"><MessageSquare className="w-3.5 h-3.5" />Messages</TabsTrigger>
                 <TabsTrigger value="notes" className="gap-1 text-xs sm:text-sm"><StickyNote className="w-3.5 h-3.5" />Notes</TabsTrigger>
@@ -344,6 +367,53 @@ const FirmCaseDetail = () => {
                             }>{doc.status || "pending"}</Badge>
                             <Button variant="ghost" size="icon" className="h-8 w-8"><Eye className="w-3.5 h-3.5" /></Button>
                           </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* ════ FILINGS ════ */}
+              <TabsContent value="filings" className="space-y-4">
+                <Card>
+                  <CardHeader className="pb-3"><CardTitle className="text-base">Record a Filing</CardTitle></CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <Select value={filingPersonId || beneficiary?.id || petitioner?.id || ""} onValueChange={setFilingPersonId}>
+                        <SelectTrigger><SelectValue placeholder="Person" /></SelectTrigger>
+                        <SelectContent>
+                          {(persons || []).map(p => (
+                            <SelectItem key={p.id} value={p.id}>{p.first_name} {p.last_name} ({p.role})</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input placeholder="Form type (e.g. I-485)" value={filingFormType} onChange={e => setFilingFormType(e.target.value)} />
+                      <Input placeholder="USCIS receipt number" value={filingReceiptNumber} onChange={e => setFilingReceiptNumber(e.target.value.toUpperCase())} className="font-mono uppercase" maxLength={13} />
+                    </div>
+                    <Button size="sm" onClick={handleAddFiling} disabled={!filingFormType.trim() || addingFiling}>
+                      <Plus className="w-3.5 h-3.5 mr-1.5" />{addingFiling ? "Saving..." : "Record Filing"}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Recording the USCIS receipt number here is what lets the client check this case's status from their portal.
+                    </p>
+                  </CardContent>
+                </Card>
+                {(!filings || filings.length === 0) ? (
+                  <Card><CardContent className="p-6 text-center text-muted-foreground">No filings recorded yet.</CardContent></Card>
+                ) : (
+                  <div className="grid gap-2">
+                    {filings.map(f => (
+                      <Card key={f.id}>
+                        <CardContent className="p-3 sm:p-4 flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                            <Receipt className="w-4 h-4 text-primary" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">{f.form_type}</p>
+                            <p className="text-xs text-muted-foreground font-mono">{f.receipt_number || "No receipt number on file"}</p>
+                          </div>
+                          {f.result && <Badge variant="outline">{f.result}</Badge>}
                         </CardContent>
                       </Card>
                     ))}

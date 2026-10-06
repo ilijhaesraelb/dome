@@ -14,7 +14,7 @@ import VoiceAgent from "@/components/voice-agent/VoiceAgent";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/immigration-assistant`;
+const CHAT_URL = `${import.meta.env.SUPABASE_URL}/functions/v1/immigration-assistant`;
 
 const guidedQuestions = [
   { icon: Globe, label: "Discover pathways", prompt: "I'd like to discover which immigration pathways might be available to me. Can you ask me some questions to help figure that out?" },
@@ -37,7 +37,7 @@ async function streamChat({
   onError: (err: string) => void;
 }) {
   const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  const token = session?.access_token || import.meta.env.SUPABASE_PUBLISHABLE_KEY;
 
   const resp = await fetch(CHAT_URL, {
     method: "POST",

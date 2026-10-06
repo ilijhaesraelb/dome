@@ -22,7 +22,7 @@ export interface TaxAssistantContext {
   errors?: TaxIssue[];
 }
 
-const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tax-assistant`;
+const CHAT_URL = `${import.meta.env.SUPABASE_URL}/functions/v1/tax-assistant`;
 
 export function useTaxAssistant() {
   const [messages, setMessages] = useState<TaxAssistantMessage[]>([]);
@@ -64,7 +64,7 @@ export function useTaxAssistant() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${import.meta.env.SUPABASE_PUBLISHABLE_KEY}`,
         },
         body: JSON.stringify({
           messages: allMessages,

@@ -37,12 +37,12 @@ const ExplainPanel = ({
 
     try {
       const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/explain-question`,
+        `${import.meta.env.SUPABASE_URL}/functions/v1/explain-question`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            Authorization: `Bearer ${import.meta.env.SUPABASE_PUBLISHABLE_KEY}`,
           },
           body: JSON.stringify({ question, formType, fieldKey }),
         }

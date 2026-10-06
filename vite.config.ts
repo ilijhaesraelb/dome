@@ -6,6 +6,9 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  // Expose only these specific Supabase vars to the client bundle (never a broad "SUPABASE_" prefix,
+  // which would also leak secrets like SUPABASE_SERVICE_ROLE_KEY).
+  envPrefix: ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_PROJECT_ID"],
   server: {
     host: "::",
     port: 8080,

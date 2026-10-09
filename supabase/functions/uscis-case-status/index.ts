@@ -17,7 +17,7 @@ function getCorsHeaders(origin: string | null) {
   };
 }
 
-const USCIS_BASE = "https://api-int.uscis.gov";
+const USCIS_BASE = "https://api.uscis.gov";
 const TOKEN_URL = `${USCIS_BASE}/oauth/accesstoken`;
 const CASE_STATUS_URL = `${USCIS_BASE}/case-status`;
 

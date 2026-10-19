@@ -1,4 +1,5 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { MessageCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
@@ -7,11 +8,19 @@ const AIAssistant = lazy(() => import("@/pages/portal/AIAssistant"));
 
 const ChatFloatingWidget = () => {
   const { session, loading } = useAuth();
+  const location = useLocation();
+  const [open, setOpen] = useState(false);
+
+  // Close the popup whenever something inside it navigates (e.g. "Continue in Form Workspace"),
+  // otherwise the new page loads behind a dialog that stays open.
+  useEffect(() => {
+    setOpen(false);
+  }, [location.pathname]);
 
   if (loading || !session) return null;
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <button
           type="button"

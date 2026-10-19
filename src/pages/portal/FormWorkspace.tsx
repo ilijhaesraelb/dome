@@ -20,6 +20,8 @@ import { useMyCase } from "@/hooks/useMyCase";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { FORM_SECTIONS, type FormFieldDef } from "@/data/formSections";
+import { TAX_INTAKE_SECTIONS } from "@/data/taxFormSections";
+import { buildAnswerSummaryPdf } from "@/lib/summary-pdf";
 import GuidedField from "@/components/form-engine/GuidedField";
 import WizardProgress from "@/components/form-engine/WizardProgress";
 import ReviewScreen from "@/components/form-engine/ReviewScreen";
@@ -99,7 +101,7 @@ const FormWorkspace = () => {
   const [uiHydrated, setUiHydrated] = useState(false);
   const uiRestoredRef = useRef(false);
 
-  const sections = form ? (FORM_SECTIONS[form.form_type] || []) : [];
+  const sections = form ? (FORM_SECTIONS[form.form_type] || TAX_INTAKE_SECTIONS[form.form_type] || []) : [];
   const template = form ? TEMPLATE_REGISTRY[form.form_type] : null;
   const allFields = useMemo(() => sections.flatMap(s => s.fields), [sections]);
   const draftStorageKey = useMemo(() => (id ? buildFormDraftStorageKey(id) : null), [id]);
@@ -323,7 +325,10 @@ const FormWorkspace = () => {
         (addresses || []) as Record<string, unknown>[],
         fieldValuesArr as Record<string, unknown>[],
       );
-      const previewBytes = await generatePreviewPdf(form.form_type, caseData);
+      // Forms without an official PDF template (e.g. tax intake) get an answer-summary PDF
+      const previewBytes = template
+        ? await generatePreviewPdf(form.form_type, caseData)
+        : buildAnswerSummaryPdf(form.form_name || form.form_type, sections, values);
       const blob = new Blob([new Uint8Array(previewBytes)], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -337,7 +342,7 @@ const FormWorkspace = () => {
         variant: "destructive",
       });
     } finally { setPreviewLoading(false); }
-  }, [form, values, profile, persons, addresses, toast, previewUrl]);
+  }, [form, template, sections, values, profile, persons, addresses, toast, previewUrl]);
 
   /* ── Export ── */
   const handleExport = async () => {
@@ -364,7 +369,14 @@ const FormWorkspace = () => {
         (addresses || []) as Record<string, unknown>[],
         fieldValuesArr as Record<string, unknown>[],
       );
-      const result = await fillPdfTemplate(form.form_type, caseData);
+      const result = template
+        ? await fillPdfTemplate(form.form_type, caseData)
+        : {
+            pdfBytes: buildAnswerSummaryPdf(form.form_name || form.form_type, sections, values),
+            filledFields: Object.keys(values).filter(k => values[k]?.trim()),
+            missingRequired: allFields.filter(f => f.required && !values[f.key]?.trim()).map(f => f.key),
+            totalFields: allFields.length,
+          };
       const blob = new Blob([new Uint8Array(result.pdfBytes)], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const petName = values.petitioner_last_name || values.last_name || "draft";

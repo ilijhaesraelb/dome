@@ -362,3 +362,10 @@ export const TAX_PRICING = {
   individual_filing: { price: 49, label: "Individual Filing Support", priceId: "price_tax_individual_placeholder" },
   individual_readiness: { price: 0, label: "Readiness Check (Free)", priceId: "" },
 };
+
+// Intake questionnaires by form_type code (as stored on form_instances by the voice agent).
+// These have no official PDF template — previews/exports use an answer-summary PDF.
+export const TAX_INTAKE_SECTIONS: Record<string, FormSection[]> = {
+  "TAX-INTAKE": INDIVIDUAL_TAX_INTAKE_SECTIONS,
+  "NP-INTAKE": NONPROFIT_INTAKE_SECTIONS,
+};

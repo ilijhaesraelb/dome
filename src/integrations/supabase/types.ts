@@ -8072,6 +8072,16 @@ export type Database = {
         Args: { _invitation_id: string }
         Returns: undefined
       }
+      become_affiliate: {
+        Args: {
+          _country: string
+          _display_name: string
+          _email: string
+          _paypal_email: string
+          _tax_status: string
+        }
+        Returns: string
+      }
       can_access_tax_file: {
         Args: { _tax_file_id: string; _user_id: string }
         Returns: boolean

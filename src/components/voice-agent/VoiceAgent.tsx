@@ -32,7 +32,7 @@ import { SUPPORTED_LANGUAGES } from "@/hooks/useTranslation";
 import { buildFormDraftStorageKey } from "@/lib/form-flow";
 import { FORM_SECTIONS, type FormSection, type FormFieldDef } from "@/data/formSections";
 import { INDIVIDUAL_TAX_INTAKE_SECTIONS, NONPROFIT_INTAKE_SECTIONS } from "@/data/taxFormSections";
-import { detectCommand } from "@/lib/voice-agent/commandDetector";
+import { detectCommand, detectYesNo } from "@/lib/voice-agent/commandDetector";
 import { parseAnswer, isSensitiveField, maskValue } from "@/lib/voice-agent/answerParser";
 import {
   type AgentLang,
@@ -364,7 +364,9 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
         const done = prevSec?.fields.filter(f => s.answers[f.key]).length ?? 0;
         speak(
           tMsg("sectionCompleteFull", s.language, { done: String(done), nextSection: s.sections[s.sectionIdx]?.title ?? "" }),
-          () => speakCurrentQuestion()
+          // Leave the section_end screen before asking — otherwise the "Section complete"
+          // card stays up and the mic never restarts (it only listens in asking/confirming).
+          () => { dispatch({ type: "NEXT_SECTION" }); speakCurrentQuestion(); }
         );
       } else if (s.phase === "asking") {
         speakCurrentQuestion();
@@ -406,7 +408,12 @@ export default function VoiceAgent({ onExit }: VoiceAgentProps) {
       return;
     }
 
-    const cmd = detectCommand(transcript);
+    let cmd = detectCommand(transcript);
+    // While confirming, accept any reply that starts with yes/no ("yes, save it", "no try again", "sí")
+    if (!cmd && s.phase === "confirming") {
+      const yn = detectYesNo(transcript);
+      if (yn) cmd = { command: yn, remainder: "" };
+    }
     if (cmd) {
       switch (cmd.command) {
         case "confirm":

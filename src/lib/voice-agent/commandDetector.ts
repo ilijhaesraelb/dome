@@ -121,8 +121,52 @@ const COMMAND_TABLE: CommandEntry[] = [
   },
 ];
 
+/**
+ * Whisper returns punctuated, capitalised text ("Yes.", "No, try again.") —
+ * strip punctuation and collapse whitespace so the exact-match patterns work.
+ * Apostrophes and "/" are kept since some patterns rely on them.
+ */
+export function normalizeTranscript(transcript: string): string {
+  return transcript
+    .replace(/[‘’ʼ]/g, "'")
+    .replace(/[^\p{L}\p{N}\s'/]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+// Leading yes/no words across the agent's 11 languages (en, es, pt, fr, ht, ar, zh, ja, ur, hi, de)
+const YES_WORDS = new Set([
+  "yes", "yeah", "yep", "yup", "ok", "okay", "correct", "right", "confirm", "sure",
+  "sí", "si", "claro", "correcto", "sim", "certo", "oui", "wi", "dakò",
+  "نعم", "أجل", "صحيح", "是", "是的", "对", "對", "好", "はい", "ええ",
+  "ہاں", "جی", "हाँ", "हां", "जी", "ja", "jawohl", "richtig",
+]);
+const NO_WORDS = new Set([
+  "no", "nope", "wrong", "incorrect", "não", "nao", "non", "pa", "lā", "لا", "كلا",
+  "不", "不是", "不对", "不對", "いいえ", "違う", "ちがう", "نہیں", "नहीं", "नही", "nein", "falsch",
+]);
+
+/**
+ * Looser yes/no check for the confirmation step: matches when the reply
+ * *starts* with a yes/no word (e.g. "yes save it", "no try again", "sí").
+ */
+export function detectYesNo(transcript: string): "confirm" | "reject" | null {
+  const norm = normalizeTranscript(transcript);
+  if (!norm) return null;
+  if (YES_WORDS.has(norm) || /^(yes|yeah|yep|ok|okay)\b/.test(norm)) return "confirm";
+  if (NO_WORDS.has(norm) || /^(no|nope)\b/.test(norm)) return "reject";
+  const first = norm.split(" ")[0];
+  if (YES_WORDS.has(first)) return "confirm";
+  if (NO_WORDS.has(first)) return "reject";
+  // CJK replies have no spaces — check prefixes
+  for (const w of NO_WORDS) if (/[^\x00-\x7F]/.test(w) && norm.startsWith(w)) return "reject";
+  for (const w of YES_WORDS) if (/[^\x00-\x7F]/.test(w) && norm.startsWith(w)) return "confirm";
+  return null;
+}
+
 export function detectCommand(transcript: string): DetectedCommand | null {
-  const trimmed = transcript.trim();
+  const trimmed = normalizeTranscript(transcript);
   for (const entry of COMMAND_TABLE) {
     for (const pattern of entry.patterns) {
       if (pattern.test(trimmed)) {

@@ -312,22 +312,14 @@ const AffiliateProgram = () => {
     if (!user) { toast.info("Please sign up or log in first, then become an affiliate."); navigate("/signup"); return; }
     setLoading(true);
     try {
-      const { error } = await supabase.from("affiliates").insert({
-        user_id: user.id,
-        display_name: form.fullName,
-        email: form.email,
-        affiliate_code:
-          form.fullName.replace(/\s+/g, "").toUpperCase().slice(0, 8) +
-          Math.random().toString(36).slice(2, 6).toUpperCase(),
-        type: "individual",
-        payment_method: `paypal:${form.paypalEmail}`,
-        notes: `Country: ${form.country}, Tax: ${form.taxStatus}`,
-        subscription_commission_pct: 20,
-        export_commission_pct: 15,
-        cookie_duration_days: 90,
-        attribution_window_days: 90,
-        min_payout_amount: 50,
-        payout_term_months: 12,
+      // Program terms (commission %, payout window, code) are set server-side —
+      // the affiliates table only accepts admin inserts under RLS.
+      const { error } = await supabase.rpc("become_affiliate", {
+        _display_name: form.fullName,
+        _email: form.email,
+        _paypal_email: form.paypalEmail,
+        _country: form.country,
+        _tax_status: form.taxStatus,
       });
       if (error) throw error;
       toast.success("Welcome! Your affiliate account is now active.");
